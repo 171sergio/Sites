@@ -42,6 +42,72 @@ function calculateEndTime(startTime, durationMinutes = 30) {
     return `${endHours}:${endMinutes}`;
 }
 
+// Função para normalizar telefone - remove todos os caracteres não numéricos
+function normalizePhone(phone) {
+    if (!phone) return '';
+    
+    // Remove todos os caracteres não numéricos
+    let normalized = phone.replace(/\D/g, '');
+    
+    console.log('Normalizando telefone:', phone, '->', normalized);
+    
+    // Se tem 13 dígitos e começa com 55, remove o código do país
+    if (normalized.length === 13 && normalized.startsWith('55')) {
+        normalized = normalized.substring(2);
+    }
+    
+    // Se tem 12 dígitos e começa com 55, remove o código do país
+    if (normalized.length === 12 && normalized.startsWith('55')) {
+        normalized = normalized.substring(2);
+    }
+    
+    // Se tem 11 dígitos, está no formato correto (DDD + 9 + número)
+    if (normalized.length === 11) {
+        return normalized;
+    }
+    
+    // Se tem 10 dígitos, adiciona o 9 após o DDD
+    if (normalized.length === 10) {
+        const ddd = normalized.substring(0, 2);
+        const numero = normalized.substring(2);
+        normalized = ddd + '9' + numero;
+    }
+    
+    // Se tem 9 dígitos, adiciona DDD padrão (31 - Belo Horizonte)
+    if (normalized.length === 9) {
+        normalized = '31' + normalized;
+    }
+    
+    // Se tem 8 dígitos, adiciona DDD e o 9
+    if (normalized.length === 8) {
+        normalized = '319' + normalized;
+    }
+    
+    console.log('Telefone normalizado final:', normalized);
+    return normalized;
+}
+
+// Função para formatar telefone para exibição (DDD) 9XXXX-XXXX
+function formatPhoneDisplay(phone) {
+    const normalized = normalizePhone(phone);
+    
+    if (normalized.length === 11) {
+        const ddd = normalized.substring(0, 2);
+        const firstPart = normalized.substring(2, 7);
+        const secondPart = normalized.substring(7);
+        return `(${ddd}) ${firstPart}-${secondPart}`;
+    }
+    
+    return phone; // Retorna original se não conseguir formatar
+}
+
+// Função para comparar telefones (verifica se são o mesmo número)
+function phonesMatch(phone1, phone2) {
+    const normalized1 = normalizePhone(phone1);
+    const normalized2 = normalizePhone(phone2);
+    return normalized1 === normalized2;
+}
+
 // Função utilitária para formatar horário sem segundos
 function formatTimeHHMM(timeString) {
     if (!timeString) return '';
@@ -1325,7 +1391,7 @@ async function saveAppointment() {
         console.log('Dados do formulário:', { id, clienteNome, clienteTelefone, data, horario, servico, status, preco });
         
         // Validações básicas
-        if (!id || !clienteNome || !clienteTelefone || !data || !horario || !servico) {
+        if (!id || !clienteNome || !data || !horario || !servico) {
             console.log('Validação falhou - campos obrigatórios vazios');
             alert('Por favor, preencha todos os campos obrigatórios.');
             return;
@@ -1367,7 +1433,7 @@ async function saveAppointment() {
             // Atualizar o agendamento
             const updatedAppointment = {
                 ...appointments[appointmentIndex],
-                telefone: clienteTelefone,
+                telefone: normalizePhone(clienteTelefone),
                 nome_cliente: clienteNome,
                 servico: servico,
                 data_horario: dataHorario.toISOString(),
@@ -1406,7 +1472,7 @@ async function saveAppointment() {
         
         // Preparar dados para o Supabase
         const updatedData = {
-            telefone: clienteTelefone,
+            telefone: normalizePhone(clienteTelefone),
             nome_cliente: clienteNome,
             servico: servico,
             data_horario: dataHorario.toISOString(),
@@ -1489,12 +1555,12 @@ async function deleteAppointment(id) {
         }
         
         console.log('Modo Supabase - excluindo do banco');
+        console.log('ID para exclusão:', id, 'Tipo:', typeof id);
         
         const { data: result, error } = await supabaseClient
             .from('agendamentos')
             .delete()
-            .eq('id', parseInt(id))
-            .select();
+            .eq('id', parseInt(id));
         
         if (error) {
             console.error('Erro do Supabase:', error);
@@ -1503,10 +1569,12 @@ async function deleteAppointment(id) {
         
         console.log('Resultado da exclusão:', result);
         
-        loadAppointments();
-        loadTodayAppointments();
-        loadOverviewData();
-        loadScheduleGrid();
+        // Recarregar todas as visualizações
+        await loadAppointments();
+        await loadTodayAppointments();
+        await loadOverviewData();
+        await loadScheduleGrid();
+        await loadAllClients(); // Recarregar clientes também
         
         alert('Agendamento excluído com sucesso!');
         console.log('=== DELETE APPOINTMENT CONCLUÍDO COM SUCESSO (SUPABASE) ===');
@@ -1514,6 +1582,72 @@ async function deleteAppointment(id) {
     } catch (error) {
         console.error('Erro ao excluir agendamento:', error);
         alert('Erro ao excluir agendamento: ' + (error.message || 'Erro desconhecido'));
+    }
+}
+
+// Função para excluir cliente
+async function deleteClient(telefone) {
+    if (!confirm('Tem certeza que deseja excluir este cliente? Todos os agendamentos relacionados também serão excluídos.')) {
+        return;
+    }
+    
+    console.log('=== INICIANDO DELETE CLIENT ===', telefone);
+    
+    try {
+        if (!supabaseClient) {
+            console.log('Modo exemplo - excluindo cliente dos dados locais');
+            
+            // Remover cliente da lista
+            const clientIndex = allClients.findIndex(client => phonesMatch(client.telefone, telefone));
+            if (clientIndex !== -1) {
+                allClients.splice(clientIndex, 1);
+            }
+            
+            // Remover agendamentos do cliente
+            appointments = appointments.filter(apt => !phonesMatch(apt.telefone, telefone));
+            todayAppointments = todayAppointments.filter(apt => !phonesMatch(apt.telefone, telefone));
+            
+            // Recarregar visualizações
+            renderAppointmentsTable();
+            renderTodaySchedule();
+            loadScheduleGrid();
+            loadOverviewData();
+            loadClients();
+            
+            alert('Cliente excluído com sucesso!');
+            return;
+        }
+        
+        console.log('Modo Supabase - excluindo cliente do banco');
+        
+        // Normalizar telefone para busca
+        const normalizedPhone = normalizePhone(telefone);
+        
+        // Excluir todos os agendamentos do cliente
+        const { error: appointmentsError } = await supabaseClient
+            .from('agendamentos')
+            .delete()
+            .eq('telefone', normalizedPhone);
+        
+        if (appointmentsError) {
+            console.error('Erro ao excluir agendamentos:', appointmentsError);
+            throw appointmentsError;
+        }
+        
+        // Recarregar todas as visualizações
+        await loadAppointments();
+        await loadTodayAppointments();
+        await loadOverviewData();
+        await loadScheduleGrid();
+        await loadAllClients();
+        await loadClients();
+        
+        alert('Cliente e todos os seus agendamentos foram excluídos com sucesso!');
+        console.log('=== DELETE CLIENT CONCLUÍDO COM SUCESSO ===');
+        
+    } catch (error) {
+        console.error('Erro ao excluir cliente:', error);
+        alert('Erro ao excluir cliente: ' + (error.message || 'Erro desconhecido'));
     }
 }
 
@@ -1561,18 +1695,23 @@ async function loadAllClients() {
         
         if (error) throw error;
         
-        // Criar lista de clientes únicos baseada no telefone
+        // Criar lista de clientes únicos baseada no telefone normalizado
         const uniqueClients = [];
         const seenPhones = new Set();
         
         data?.forEach((appointment, index) => {
-            if (appointment.telefone && !seenPhones.has(appointment.telefone)) {
-                seenPhones.add(appointment.telefone);
-                uniqueClients.push({
-                    id: index + 1, // ID temporário
-                    nome: appointment.nome_cliente,
-                    telefone: appointment.telefone
-                });
+            if (appointment.telefone) {
+                const normalizedPhone = normalizePhone(appointment.telefone);
+                
+                if (!seenPhones.has(normalizedPhone)) {
+                    seenPhones.add(normalizedPhone);
+                    uniqueClients.push({
+                        id: index + 1, // ID temporário
+                        nome: appointment.nome_cliente,
+                        telefone: normalizedPhone, // Usar telefone normalizado
+                        originalPhone: appointment.telefone // Manter original para referência
+                    });
+                }
             }
         });
         
@@ -1723,11 +1862,22 @@ function renderClientsGrid(clients) {
     clients.forEach(client => {
         const card = document.createElement('div');
         card.className = 'client-card';
+        
+        // Formatar telefone para exibição
+        const formattedPhone = formatPhoneDisplay(client.telefone);
+        
         card.innerHTML = `
-            <h4>${client.nome}</h4>
-            <p><strong>Telefone:</strong> ${client.telefone}</p>
-            <p><strong>Total de Agendamentos:</strong> ${client.totalAgendamentos || 0}</p>
-            <p><strong>Último Agendamento:</strong> ${client.ultimoAgendamento ? new Date(client.ultimoAgendamento).toLocaleDateString('pt-BR') : 'Nunca'}</p>
+            <div class="client-header">
+                <h4>${client.nome}</h4>
+                <button class="client-delete-btn" onclick="deleteClient('${client.telefone}')" title="Excluir Cliente">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </div>
+            <div class="client-info">
+                <p><strong>Telefone:</strong> <span class="client-phone">${formattedPhone}</span></p>
+                <p><strong>Total de Agendamentos:</strong> ${client.totalAgendamentos || 0}</p>
+                <p><strong>Último Agendamento:</strong> ${client.ultimoAgendamento ? new Date(client.ultimoAgendamento).toLocaleDateString('pt-BR') : 'Nunca'}</p>
+            </div>
         `;
         container.appendChild(card);
     });
@@ -1799,6 +1949,18 @@ function updateServicePrice() {
     }
 }
 
+function updateEditServicePrice() {
+    const servicoSelect = document.getElementById('editServico');
+    const precoInput = document.getElementById('editPreco');
+    const selectedOption = servicoSelect.options[servicoSelect.selectedIndex];
+    
+    if (selectedOption && selectedOption.dataset.price) {
+        precoInput.value = selectedOption.dataset.price;
+    } else {
+        precoInput.value = '';
+    }
+}
+
 // Função para adicionar novo agendamento
 async function addNewAppointment(event) {
     event.preventDefault();
@@ -1815,7 +1977,7 @@ async function addNewAppointment(event) {
         const observacoes = document.getElementById('addObservacoes').value.trim();
         
         // Validações
-        if (!clienteNome || !clienteTelefone || !servico || !data || !horario) {
+        if (!clienteNome || !servico || !data || !horario) {
             alert('Por favor, preencha todos os campos obrigatórios.');
             return;
         }
@@ -1839,7 +2001,7 @@ async function addNewAppointment(event) {
         
         const newAppointment = {
             id: Date.now(), // ID temporário
-            telefone: clienteTelefone,
+            telefone: normalizePhone(clienteTelefone),
             nome_cliente: clienteNome,
             servico: servico,
             data_horario: dataHorario.toISOString(),
@@ -1880,7 +2042,7 @@ async function addNewAppointment(event) {
         const observacoes = document.getElementById('addObservacoes').value.trim();
         
         // Validações
-        if (!clienteNome || !clienteTelefone || !servico || !data || !horario) {
+        if (!clienteNome || !servico || !data || !horario) {
             alert('Por favor, preencha todos os campos obrigatórios.');
             return;
         }
@@ -1907,7 +2069,7 @@ async function addNewAppointment(event) {
         const horarioFim = calculateEndTime(horario, 30);
         
         const newAppointment = {
-            telefone: clienteTelefone,
+            telefone: normalizePhone(clienteTelefone),
             nome_cliente: clienteNome,
             servico: servico,
             data_horario: dataHorario.toISOString(),
@@ -1992,6 +2154,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Tornar funções disponíveis globalmente
     window.editAppointment = editAppointment;
     window.deleteAppointment = deleteAppointment;
+    window.updateEditServicePrice = updateEditServicePrice;
     
     // Event listener para o formulário de edição
     const editForm = document.getElementById('editForm');

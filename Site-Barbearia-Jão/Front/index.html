@@ -291,18 +291,22 @@
                     
                     <div class="form-group">
                         <label>Telefone:</label>
-                        <input type="tel" id="addTelefone" placeholder="(11) 99999-9999" required>
+                        <input type="tel" id="addTelefone" placeholder="(11) 99999-9999">
                     </div>
                     
                     <div class="form-group">
                         <label for="addServico">Serviço:</label>
                         <select id="addServico" required onchange="updateServicePrice()">
                             <option value="">Selecione um serviço</option>
-                            <option value="Corte Masculino" data-price="25.00">Corte Masculino - R$ 25,00</option>
-                            <option value="Corte + Barba" data-price="35.00">Corte + Barba - R$ 35,00</option>
-                            <option value="Apenas Barba" data-price="15.00">Apenas Barba - R$ 15,00</option>
-                            <option value="Corte Infantil" data-price="20.00">Corte Infantil - R$ 20,00</option>
-                            <option value="Sobrancelha" data-price="10.00">Sobrancelha - R$ 10,00</option>
+                            <option value="Corte" data-price="30.00">Corte - R$ 30,00</option>
+                            <option value="Corte Máquina" data-price="25.00">Corte Máquina - R$ 25,00</option>
+                            <option value="Barba" data-price="20.00">Barba - R$ 20,00</option>
+                            <option value="Pezinho" data-price="15.00">Pezinho - R$ 15,00</option>
+                            <option value="Sobrancelha" data-price="20.00">Sobrancelha - R$ 20,00</option>
+                            <option value="Relaxamento" data-price="20.00">Relaxamento - R$ 20,00</option>
+                            <option value="Tintura" data-price="20.00">Tintura - R$ 20,00</option>
+                            <option value="Luzes" data-price="50.00">Luzes - R$ 50,00</option>
+                            <option value="Platinado" data-price="90.00">Platinado - R$ 90,00</option>
                         </select>
                     </div>
                     
@@ -341,7 +345,7 @@
                     
                     <div class="form-group">
                         <label>Preço:</label>
-                        <input type="number" id="addPreco" step="0.01" min="0" placeholder="0.00" required readonly>
+                        <input type="number" id="addPreco" step="0.01" min="0" placeholder="0.00" required>
                     </div>
                     
                     <div class="form-group">
@@ -349,6 +353,8 @@
                         <select id="addStatus" required>
                             <option value="agendado">Agendado</option>
                             <option value="confirmado">Confirmado</option>
+                            <option value="concluido">Concluído</option>
+                            <option value="cancelado">Cancelado</option>
                         </select>
                     </div>
                     
@@ -386,22 +392,22 @@
                     
                     <div class="form-group">
                         <label>Telefone:</label>
-                        <input type="tel" id="editTelefone" required>
+                        <input type="tel" id="editTelefone">
                     </div>
                     
                     <div class="form-group">
                         <label>Serviço:</label>
-                        <select id="editServico" required>
-                            <option value="Corte">Corte - R$ 30,00</option>
-                            <option value="Corte Máquina">Corte Máquina - R$ 25,00</option>
-                            <option value="Barba">Barba - R$ 20,00</option>
-                            <option value="Pezinho">Pezinho - R$ 15,00</option>
-                            <option value="Sobrancelha">Sobrancelha - R$ 20,00</option>
-                            <option value="Relaxamento">Relaxamento - R$ 20,00</option>
-                            <option value="Tintura">Tintura - R$ 20,00</option>
-                            <option value="Luzes">Luzes - R$ 50,00</option>
-                            <option value="Platinado">Platinado - R$ 90,00</option>
-                            <option value="COMBO">COMBO - R$ 65,00</option>
+                        <select id="editServico" required onchange="updateEditServicePrice()">
+                            <option value="">Selecione um serviço</option>
+                            <option value="Corte" data-price="30.00">Corte - R$ 30,00</option>
+                            <option value="Corte Máquina" data-price="25.00">Corte Máquina - R$ 25,00</option>
+                            <option value="Barba" data-price="20.00">Barba - R$ 20,00</option>
+                            <option value="Pezinho" data-price="15.00">Pezinho - R$ 15,00</option>
+                            <option value="Sobrancelha" data-price="20.00">Sobrancelha - R$ 20,00</option>
+                            <option value="Relaxamento" data-price="20.00">Relaxamento - R$ 20,00</option>
+                            <option value="Tintura" data-price="20.00">Tintura - R$ 20,00</option>
+                            <option value="Luzes" data-price="50.00">Luzes - R$ 50,00</option>
+                            <option value="Platinado" data-price="90.00">Platinado - R$ 90,00</option>
                         </select>
                     </div>
                     
