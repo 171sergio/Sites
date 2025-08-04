@@ -21,17 +21,103 @@ if (typeof SUPABASE_CONFIG !== 'undefined' &&
         }
     } catch (error) {
         console.error('❌ Erro ao configurar Supabase:', error);
-        console.warn('⚠️ Usando modo exemplo devido ao erro do Supabase');
+        alert('❌ Erro: Supabase não configurado corretamente. Verifique o arquivo config.js');
         isSupabaseConfigured = false;
         supabaseClient = null;
     }
 } else {
-    console.warn('⚠️ Supabase não configurado. Usando dados de exemplo.');
-    console.log('📝 Para configurar o Supabase, edite o arquivo config.js');
+    alert('❌ Erro: Supabase não configurado. Configure o arquivo config.js para usar o sistema.');
+    console.error('❌ Supabase não configurado. Configure o arquivo config.js');
     isSupabaseConfigured = false;
 }
 
 // Estado da aplicação
+let currentUser = null;
+let currentSection = 'overview';
+let clients = [];
+let services = [];
+
+// Cache para dados do banco
+const dataCache = new Map();
+const clientsCache = new Map();
+const servicesCache = new Map();
+
+// Função para carregar serviços do banco
+async function loadServices() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado - não é possível carregar serviços');
+        return [];
+    }
+
+    try {
+        const { data, error } = await supabaseClient
+            .from('servicos')
+            .select('*')
+            .eq('ativo', true)
+            .order('categoria', { ascending: true });
+
+        if (error) throw error;
+        
+        services = data || [];
+        
+        // Atualizar cache
+        services.forEach(service => {
+            servicesCache.set(service.id, service);
+        });
+        
+        return services;
+    } catch (error) {
+        console.error('Erro ao carregar serviços:', error);
+        return [];
+    }
+}
+
+// Função para buscar ou criar cliente
+async function findOrCreateClient(telefone, nome) {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado - não é possível buscar/criar cliente');
+        throw new Error('Supabase não configurado');
+    }
+
+    const normalizedPhone = normalizePhone(telefone);
+    
+    try {
+        // Primeiro, tentar encontrar cliente existente
+        const { data: existingClient, error: searchError } = await supabaseClient
+            .from('clientes')
+            .select('*')
+            .eq('telefone', normalizedPhone)
+            .single();
+
+        if (existingClient) {
+            // Cliente encontrado, atualizar cache
+            clientsCache.set(existingClient.id, existingClient);
+            return existingClient;
+        }
+
+        // Cliente não encontrado, criar novo
+        const { data: newClient, error: createError } = await supabaseClient
+            .from('clientes')
+            .insert([{
+                telefone: normalizedPhone,
+                nome: nome,
+                status_cliente: 'ativo'
+            }])
+            .select()
+            .single();
+
+        if (createError) throw createError;
+
+        // Adicionar ao cache
+        clientsCache.set(newClient.id, newClient);
+        
+        return newClient;
+    } catch (error) {
+        console.error('Erro ao buscar/criar cliente:', error);
+        throw error;
+    }
+}
+
 // Função utilitária para calcular horário de fim
 function calculateEndTime(startTime, durationMinutes = 30) {
     const [hours, minutes] = startTime.split(':').map(Number);
@@ -42,6 +128,90 @@ function calculateEndTime(startTime, durationMinutes = 30) {
     return `${endHours}:${endMinutes}`;
 }
 
+// Função legada removida - usar checkTimeConflictSupabase
+
+// Função utilitária para debounce (melhora performance em buscas)
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Função para cache simples de dados
+// Remove duplicate dataCache declaration since it's already declared at the top
+function getCachedData(key, fetchFunction, ttl = 300000) { // 5 minutos de cache
+    const cached = dataCache.get(key);
+    if (cached && Date.now() - cached.timestamp < ttl) {
+        return Promise.resolve(cached.data);
+    }
+    
+    return fetchFunction().then(data => {
+        dataCache.set(key, { data, timestamp: Date.now() });
+        return data;
+    });
+}
+
+// Função para limpar cache
+function clearCache(key = null) {
+    if (key) {
+        dataCache.delete(key);
+    } else {
+        dataCache.clear();
+    }
+}
+
+// Função para verificar conflitos no Supabase
+async function checkTimeConflictSupabase(date, startTime, endTime, excludeId = null) {
+    if (!supabaseClient) return { conflict: false };
+    
+    try {
+        let query = supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('id, cliente_nome, horario_inicio, horario_fim')
+            .gte('data_horario', `${date}T00:00:00`)
+            .lte('data_horario', `${date}T23:59:59`);
+        
+        if (excludeId) {
+            query = query.neq('id', excludeId);
+        }
+        
+        const { data: existingAppointments, error } = await query;
+        
+        if (error) throw error;
+        
+        for (const apt of existingAppointments || []) {
+            const aptStart = apt.horario_inicio;
+            const aptEnd = apt.horario_fim;
+            
+            // Verificar sobreposição de horários
+            if (
+                (startTime >= aptStart && startTime < aptEnd) || // Início dentro do agendamento existente
+                (endTime > aptStart && endTime <= aptEnd) ||     // Fim dentro do agendamento existente
+                (startTime <= aptStart && endTime >= aptEnd)     // Agendamento novo engloba o existente
+            ) {
+                return {
+                    conflict: true,
+                    conflictWith: {
+                        ...apt,
+                        nome_cliente: apt.cliente_nome
+                    }
+                };
+            }
+        }
+        
+        return { conflict: false };
+    } catch (error) {
+        console.error('Erro ao verificar conflitos:', error);
+        return { conflict: false };
+    }
+}
+
 // Função para normalizar telefone - remove todos os caracteres não numéricos
 function normalizePhone(phone) {
     if (!phone) return '';
@@ -49,7 +219,7 @@ function normalizePhone(phone) {
     // Remove todos os caracteres não numéricos
     let normalized = phone.replace(/\D/g, '');
     
-    console.log('Normalizando telefone:', phone, '->', normalized);
+    // Debug removido para performance
     
     // Se tem 13 dígitos e começa com 55, remove o código do país
     if (normalized.length === 13 && normalized.startsWith('55')) {
@@ -83,7 +253,7 @@ function normalizePhone(phone) {
         normalized = '319' + normalized;
     }
     
-    console.log('Telefone normalizado final:', normalized);
+    // Debug removido para performance
     return normalized;
 }
 
@@ -153,10 +323,40 @@ function getFormattedTime(appointment) {
     return '';
 }
 
-let currentUser = null;
-let currentSection = 'overview';
-let appointments = [];
-let todayAppointments = [];
+// Função para calcular todos os slots de 30 minutos ocupados durante um período
+function getOccupiedTimeSlots(startTime, endTime) {
+    const slots = [];
+    
+    if (!startTime) {
+        return slots;
+    }
+    
+    // Se não tem horário de fim, assumir 30 minutos
+    if (!endTime) {
+        const [hours, minutes] = startTime.split(':').map(Number);
+        const startDate = new Date();
+        startDate.setHours(hours, minutes, 0, 0);
+        const endDate = new Date(startDate.getTime() + 30 * 60000); // +30 minutos
+        endTime = `${endDate.getHours().toString().padStart(2, '0')}:${endDate.getMinutes().toString().padStart(2, '0')}`;
+    }
+    
+    // Converter horários para minutos para facilitar o cálculo
+    const [startHours, startMinutes] = startTime.split(':').map(Number);
+    const [endHours, endMinutes] = endTime.split(':').map(Number);
+    
+    const startTotalMinutes = startHours * 60 + startMinutes;
+    const endTotalMinutes = endHours * 60 + endMinutes;
+    
+    // Gerar todos os slots de 30 minutos no período
+    for (let minutes = startTotalMinutes; minutes < endTotalMinutes; minutes += 30) {
+        const hours = Math.floor(minutes / 60);
+        const mins = minutes % 60;
+        const timeSlot = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+        slots.push(timeSlot);
+    }
+    
+    return slots;
+}
 
 // Credenciais de login
 const VALID_CREDENTIALS = {
@@ -248,7 +448,6 @@ function setupEventListeners() {
     document.getElementById('scheduleTodayBtn').addEventListener('click', () => setDateToToday('scheduleDate'));
     document.getElementById('tomorrowBtn').addEventListener('click', () => setDateToTomorrow('scheduleDate'));
     document.getElementById('refreshAppointments').addEventListener('click', () => loadAppointments());
-    document.getElementById('generateReport').addEventListener('click', () => generateReport());
     
     // Modal
     document.querySelector('.close').addEventListener('click', closeModal);
@@ -346,9 +545,14 @@ function showSection(sectionId) {
             break;
         case 'clients':
             loadClients();
+            setupClientSearch();
             break;
         case 'reports':
-            loadReports();
+            // Carregar relatórios automaticamente
+            setTimeout(() => loadReports(), 100);
+            break;
+        case 'unpaid':
+            loadUnpaidClients();
             break;
     }
 }
@@ -357,20 +561,19 @@ function showSection(sectionId) {
 async function loadDashboardData() {
     showLoading();
     try {
-        console.log('Iniciando carregamento dos dados do dashboard...');
-        
         // Carregar dados sequencialmente para garantir que appointments seja carregado primeiro
         await loadAppointments();
-        console.log('Agendamentos carregados:', appointments.length);
         
         // Aguardar um pouco para garantir que appointments foi populado
         await new Promise(resolve => setTimeout(resolve, 100));
         
         await loadTodayAppointments();
-        console.log('Agendamentos de hoje carregados:', todayAppointments.length);
-        
         await loadOverviewData();
-        console.log('Dados de overview carregados');
+        
+        // Carregar grade de horários se estivermos na seção agenda
+        if (currentSection === 'schedule') {
+            await loadScheduleGrid();
+        }
         
     } catch (error) {
         console.error('Erro ao carregar dados:', error);
@@ -382,8 +585,8 @@ async function loadDashboardData() {
 
 async function loadAppointments() {
     if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo');
-        displayExampleAppointments();
+        console.error('❌ Supabase não configurado - não é possível carregar agendamentos');
+        showError('Erro: Supabase não configurado. Configure o arquivo config.js');
         return;
     }
     
@@ -391,8 +594,9 @@ async function loadAppointments() {
         const dateFilter = document.getElementById('dateFilter').value;
         const statusFilter = document.getElementById('statusFilter').value;
         
+        // Usar a view que já faz os JOINs
         let query = supabaseClient
-            .from('agendamentos')
+            .from('vw_agendamentos_completos')
             .select('*')
             .order('data_horario', { ascending: true });
         
@@ -411,7 +615,25 @@ async function loadAppointments() {
         
         if (error) throw error;
         
-        appointments = data || [];
+        // Mapear dados da view para formato compatível
+        appointments = (data || []).map(apt => ({
+            id: apt.id,
+            data_horario: apt.data_horario,
+            horario_inicio: apt.horario_inicio,
+            horario_fim: apt.horario_fim,
+            status: apt.status,
+            preco: apt.preco_cobrado,
+            observacoes: apt.observacoes,
+            nome_cliente: apt.cliente_nome,
+            telefone: apt.cliente_telefone,
+            servico: apt.servico_nome,
+            duracao_minutos: apt.duracao_minutos,
+            valor_pago: apt.valor_pago,
+            valor_pendente: apt.valor_pendente,
+            pagamento: apt.status_pagamento,
+            forma_pagamento: apt.status_pagamento === 'pago' ? 'pago' : 'pendente'
+        }));
+        
         renderAppointmentsTable();
         
     } catch (error) {
@@ -420,109 +642,11 @@ async function loadAppointments() {
     }
 }
 
-// Função para exibir dados de exemplo quando Supabase não estiver configurado
-function displayExampleAppointments() {
-    const today = new Date().toISOString().split('T')[0];
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
-    
-    const exampleData = [
-        // Agendamentos para hoje
-        {
-            id: 1,
-            data_horario: `${today}T09:00:00`,
-            horario_inicio: '09:00',
-            horario_fim: '09:30',
-            nome_cliente: 'João Silva',
-            telefone: '11999999999',
-            servico: 'Corte + Barba',
-            preco: 35.00,
-            status: 'agendado',
-            observacoes: ''
-        },
-        {
-            id: 2,
-            data_horario: `${today}T10:30:00`,
-            horario_inicio: '10:30',
-            horario_fim: '11:00',
-            nome_cliente: 'Pedro Santos',
-            telefone: '11888888888',
-            servico: 'Corte Masculino',
-            preco: 25.00,
-            status: 'confirmado',
-            observacoes: ''
-        },
-        {
-            id: 3,
-            data_horario: `${today}T14:00:00`,
-            horario_inicio: '14:00',
-            horario_fim: '14:30',
-            nome_cliente: 'Carlos Oliveira',
-            telefone: '11777777777',
-            servico: 'Apenas Barba',
-            preco: 15.00,
-            status: 'agendado',
-            observacoes: 'Cliente preferencial'
-        },
-        {
-            id: 4,
-            data_horario: `${today}T16:30:00`,
-            horario_inicio: '16:30',
-            horario_fim: '17:00',
-            nome_cliente: 'Felipe',
-            telefone: '11666666666',
-            servico: 'Corte Infantil',
-            preco: 20.00,
-            status: 'confirmado',
-            observacoes: ''
-        },
-        // Agendamentos para amanhã
-        {
-            id: 5,
-            data_horario: `${tomorrowStr}T09:30:00`,
-            horario_inicio: '09:30',
-            horario_fim: '10:00',
-            nome_cliente: 'Roberto Lima',
-            telefone: '11555555555',
-            servico: 'Corte + Barba',
-            preco: 35.00,
-            status: 'agendado',
-            observacoes: ''
-        },
-        {
-            id: 6,
-            data_horario: `${tomorrowStr}T15:00:00`,
-            horario_inicio: '15:00',
-            horario_fim: '15:30',
-            nome_cliente: 'André Costa',
-            telefone: '11444444444',
-            servico: 'Sobrancelha',
-            preco: 10.00,
-            status: 'agendado',
-            observacoes: ''
-        }
-    ];
-    
-    appointments = exampleData;
-    console.log('Dados de exemplo carregados:', appointments.length, 'agendamentos');
-    renderAppointmentsTable();
-}
+
 
 async function loadTodayAppointments() {
     if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo');
-        const selectedDate = document.getElementById('currentDate').value || new Date().toISOString().split('T')[0];
-        console.log('Data selecionada para agendamentos de hoje:', selectedDate);
-        console.log('Total de agendamentos disponíveis:', appointments.length);
-        
-        todayAppointments = appointments.filter(apt => {
-            const aptDate = new Date(apt.data_horario).toISOString().split('T')[0];
-            return aptDate === selectedDate;
-        });
-        
-        console.log('Agendamentos filtrados para hoje:', todayAppointments.length);
-        renderTodaySchedule();
+        console.error('❌ Supabase não configurado - não é possível carregar agendamentos de hoje');
         return;
     }
     
@@ -532,7 +656,7 @@ async function loadTodayAppointments() {
         const endDate = `${selectedDate}T23:59:59`;
         
         const { data, error } = await supabaseClient
-            .from('agendamentos')
+            .from('vw_agendamentos_completos')
             .select('*')
             .gte('data_horario', startDate)
             .lte('data_horario', endDate)
@@ -540,7 +664,24 @@ async function loadTodayAppointments() {
         
         if (error) throw error;
         
-        todayAppointments = data || [];
+        // Mapear dados da view para formato compatível
+        todayAppointments = (data || []).map(apt => ({
+            id: apt.id,
+            data_horario: apt.data_horario,
+            horario_inicio: apt.horario_inicio,
+            horario_fim: apt.horario_fim,
+            status: apt.status,
+            preco: apt.preco_cobrado,
+            observacoes: apt.observacoes,
+            nome_cliente: apt.cliente_nome,
+            telefone: apt.cliente_telefone,
+            servico: apt.servico_nome,
+            duracao_minutos: apt.duracao_minutos,
+            valor_pago: apt.valor_pago,
+            valor_pendente: apt.valor_pendente,
+            pagamento: apt.status_pagamento,
+            forma_pagamento: apt.status_pagamento === 'pago' ? 'pago' : 'pendente'
+        }));
         renderTodaySchedule();
         
     } catch (error) {
@@ -550,8 +691,7 @@ async function loadTodayAppointments() {
 
 async function loadOverviewData() {
     if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo');
-        displayExampleOverview();
+        console.error('❌ Supabase não configurado - não é possível carregar dados de overview');
         return;
     }
     
@@ -564,23 +704,23 @@ async function loadOverviewData() {
         
         // Agendamentos da data selecionada
         const { data: selectedDateData } = await supabaseClient
-            .from('agendamentos')
+            .from('vw_agendamentos_completos')
             .select('*')
             .gte('data_horario', `${selectedDate}T00:00:00`)
             .lte('data_horario', `${selectedDate}T23:59:59`);
         
         // Agendamentos do mês
         const { data: monthData } = await supabaseClient
-            .from('agendamentos')
+            .from('vw_agendamentos_completos')
             .select('*')
             .gte('data_horario', `${startOfMonth}T00:00:00`);
         
         // Clientes únicos do mês
-        const uniqueClients = new Set(monthData?.map(item => item.nome_cliente) || []);
+        const uniqueClients = new Set(monthData?.map(item => item.cliente_nome) || []);
         
         // Receita do mês (baseada nos preços dos agendamentos concluídos)
         const monthlyRevenue = monthData?.filter(apt => apt.status === 'concluido')
-            .reduce((total, apt) => total + (parseFloat(apt.preco) || 0), 0) || 0;
+            .reduce((total, apt) => total + (parseFloat(apt.preco_cobrado) || 0), 0) || 0;
         
         // Próximo cliente da data selecionada
         const nextAppointment = selectedDateData?.find(apt => {
@@ -588,11 +728,11 @@ async function loadOverviewData() {
             const aptTime = new Date(apt.data_horario);
             return aptTime > now && (apt.status === 'agendado' || apt.status === 'confirmado');
         });
-        const nextClient = nextAppointment ? nextAppointment.nome_cliente : 'Nenhum';
+        const nextClient = nextAppointment ? nextAppointment.cliente_nome : 'Nenhum';
         
         // Receita da data selecionada
         const selectedDateRevenue = selectedDateData?.filter(apt => apt.status === 'concluido')
-            .reduce((total, apt) => total + (parseFloat(apt.preco) || 0), 0) || 0;
+            .reduce((total, apt) => total + (parseFloat(apt.preco_cobrado) || 0), 0) || 0;
         
         // Taxa de ocupação (estimativa)
         const totalSlots = 20; // 10 horas * 2 slots por hora
@@ -617,61 +757,13 @@ async function loadOverviewData() {
     }
 }
 
-// Função para exibir dados de exemplo no overview
-function displayExampleOverview() {
-    // Usar a data selecionada ou hoje como padrão
-    const selectedDate = document.getElementById('currentDate').value || new Date().toISOString().split('T')[0];
-    const today = new Date().toISOString().split('T')[0];
-    
-    console.log('Data selecionada para overview (exemplo):', selectedDate);
-    
-    // Filtrar agendamentos para a data selecionada
-    const selectedDateAppointments = appointments.filter(apt => {
-        const aptDate = apt.data_horario ? apt.data_horario.split('T')[0] : apt.data;
-        return aptDate === selectedDate;
-    });
-    
-    // Próximo cliente da data selecionada
-    const nextAppointment = selectedDateAppointments.find(apt => {
-        const now = new Date();
-        const aptTime = new Date(apt.data_horario || `${apt.data}T${apt.horario_inicio}`);
-        return aptTime > now && (apt.status === 'agendado' || apt.status === 'confirmado');
-    });
-    const nextClient = nextAppointment ? nextAppointment.nome_cliente : 'Nenhum';
-    
-    // Receita da data selecionada
-    const selectedDateRevenue = selectedDateAppointments
-        .filter(apt => apt.status === 'concluido')
-        .reduce((total, apt) => total + (parseFloat(apt.preco) || 0), 0);
-    
-    // Taxa de ocupação
-    const totalSlots = 20;
-    const occupiedSlots = selectedDateAppointments.length;
-    const occupancyRate = Math.round((occupiedSlots / totalSlots) * 100);
-    
-    // Atualizar elementos
-    document.getElementById('todayAppointments').textContent = selectedDateAppointments.length;
-    document.getElementById('nextClient').textContent = nextClient;
-    document.getElementById('todayRevenue').textContent = `R$ ${selectedDateRevenue.toFixed(2)}`;
-    document.getElementById('occupancyRate').textContent = `${occupancyRate}%`;
-    
-    // Atualizar agendamentos de hoje se a data selecionada for hoje
-    if (selectedDate === today) {
-        todayAppointments = selectedDateAppointments;
-        renderTodaySchedule();
-    }
-}
+
 
 async function loadScheduleGrid() {
-    const selectedDate = document.getElementById('scheduleDate').value || new Date().toISOString().split('T')[0];
+    const selectedDate = document.getElementById('scheduleDate')?.value || new Date().toISOString().split('T')[0];
     
     if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo');
-        const exampleData = appointments.filter(apt => {
-            const aptDate = new Date(apt.data_horario).toISOString().split('T')[0];
-            return aptDate === selectedDate;
-        });
-        renderScheduleGrid(exampleData, selectedDate);
+        console.error('❌ Supabase não configurado - não é possível carregar grade de horários');
         return;
     }
     
@@ -680,7 +772,7 @@ async function loadScheduleGrid() {
         const endDate = `${selectedDate}T23:59:59`;
         
         const { data, error } = await supabaseClient
-            .from('agendamentos')
+            .from('vw_agendamentos_completos')
             .select('*')
             .gte('data_horario', startDate)
             .lte('data_horario', endDate);
@@ -695,68 +787,11 @@ async function loadScheduleGrid() {
     }
 }
 
-async function loadClients() {
-    if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo');
-        displayExampleClients();
-        return;
-    }
-    
-    try {
-        const { data, error } = await supabaseClient
-            .from('agendamentos')
-            .select('nome_cliente, telefone, data_horario, status')
-            .order('data_horario', { ascending: false });
-        
-        if (error) throw error;
-        
-        // Agrupar por cliente
-        const clientsMap = new Map();
-        data?.forEach(appointment => {
-            const key = appointment.telefone;
-            if (!clientsMap.has(key)) {
-                clientsMap.set(key, {
-                    nome: appointment.nome_cliente,
-                    telefone: appointment.telefone,
-                    totalAgendamentos: 0,
-                    ultimoAgendamento: new Date(appointment.data_horario).toISOString().split('T')[0]
-                });
-            }
-            clientsMap.get(key).totalAgendamentos++;
-        });
-        
-        const clients = Array.from(clientsMap.values());
-        renderClientsGrid(clients);
-        
-    } catch (error) {
-        console.error('Erro ao carregar clientes:', error);
-    }
-}
-
-// Função para exibir clientes de exemplo
-function displayExampleClients() {
-    const exampleClients = [
-        {
-            nome: 'João Silva',
-            telefone: '(11) 99999-9999',
-            totalAgendamentos: 5,
-            ultimoAgendamento: '2025-01-27'
-        },
-        {
-            nome: 'Pedro Santos',
-            telefone: '(11) 88888-8888',
-            totalAgendamentos: 3,
-            ultimoAgendamento: '2025-01-25'
-        }
-    ];
-    
-    renderClientsGrid(exampleClients);
-}
-
 async function loadReports() {
+    // Carregando relatórios...
+    
     if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo');
-        renderReports(appointments);
+        console.error('❌ Supabase não configurado - não é possível carregar relatórios');
         return;
     }
     
@@ -765,8 +800,9 @@ async function loadReports() {
         const endDate = document.getElementById('reportEndDate').value;
         
         let query = supabaseClient
-            .from('agendamentos')
-            .select('*');
+            .from('vw_agendamentos_completos')
+            .select('*')
+            .order('data_horario', { ascending: false });
         
         if (startDate) {
             query = query.gte('data_horario', `${startDate}T00:00:00`);
@@ -776,14 +812,23 @@ async function loadReports() {
             query = query.lte('data_horario', `${endDate}T23:59:59`);
         }
         
+        // Se não há filtros, limitar aos últimos 30 dias
+        if (!startDate && !endDate) {
+            const thirtyDaysAgo = new Date();
+            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+            query = query.gte('data_horario', thirtyDaysAgo.toISOString());
+        }
+        
         const { data, error } = await query;
         
         if (error) throw error;
         
+        // Dados carregados com sucesso
         renderReports(data || []);
         
     } catch (error) {
         console.error('Erro ao carregar relatórios:', error);
+        showNotification('Erro ao carregar relatórios: ' + error.message, 'error');
     }
 }
 
@@ -795,7 +840,7 @@ function renderAppointmentsTable() {
         return;
     }
     
-    console.log('Renderizando tabela de agendamentos. Total:', appointments.length);
+    // Renderizando tabela de agendamentos
     tbody.innerHTML = '';
     
     if (appointments.length === 0) {
@@ -807,15 +852,21 @@ function renderAppointmentsTable() {
         const row = document.createElement('tr');
         const appointmentDate = new Date(appointment.data_horario);
         const dateStr = appointmentDate.toLocaleDateString('pt-BR');
-        const timeStr = getFormattedTime(appointment);
+        
+        // Formatar horário com início e fim
+        let timeStr = getFormattedTime(appointment);
+        if (appointment.horario_fim) {
+            const endTime = formatTimeHHMM(appointment.horario_fim);
+            timeStr += ` - ${endTime}`;
+        }
         
         row.innerHTML = `
-            <td>${appointment.nome_cliente}</td>
+            <td>${appointment.cliente_nome}</td>
             <td>${appointment.telefone}</td>
             <td>${appointment.servico || 'Corte'}</td>
             <td>${dateStr}</td>
             <td>${timeStr}</td>
-            <td>R$ ${(appointment.preco || 0).toFixed(2)}</td>
+            <td>R$ ${(appointment.preco_cobrado || 0).toFixed(2)}</td>
             <td><span class="status-badge status-${appointment.status}">${appointment.status}</span></td>
             <td>
                 <button class="action-btn btn-edit" onclick="editAppointment(${appointment.id})">
@@ -837,12 +888,12 @@ function renderTodaySchedule() {
         return;
     }
     
-    console.log('Renderizando agendamentos de hoje. Total:', todayAppointments.length);
+    // Renderizando agendamentos de hoje
     container.innerHTML = '';
     
     if (todayAppointments.length === 0) {
         container.innerHTML = '<p style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px;">Nenhum agendamento para hoje</p>';
-        console.log('Nenhum agendamento para exibir');
+        // Nenhum agendamento para hoje
         return;
     }
 
@@ -857,15 +908,21 @@ function renderTodaySchedule() {
     let htmlContent = '';
     sortedAppointments.forEach(appointment => {
         const appointmentDate = new Date(appointment.data_horario);
-        const timeStr = getFormattedTime(appointment);
         
-        console.log(`Renderizando agendamento ID: ${appointment.id} - ${appointment.nome_cliente}`);
+        // Formatar horário com início e fim
+        let timeStr = getFormattedTime(appointment);
+        if (appointment.horario_fim) {
+            const endTime = formatTimeHHMM(appointment.horario_fim);
+            timeStr += ` - ${endTime}`;
+        }
+        
+        // Renderizando agendamento
         
         htmlContent += `
             <div class="schedule-item" data-period="${getTimePeriod(appointment)}">
                 <div class="schedule-item-info">
                     <div class="schedule-time">${timeStr}</div>
-                    <div class="schedule-client">${appointment.nome_cliente}</div>
+                    <div class="schedule-client">${appointment.cliente_nome}</div>
                     <div class="schedule-service">${appointment.servico || 'Corte'}</div>
                 </div>
                 <div class="schedule-actions">
@@ -895,14 +952,14 @@ function setupTodayScheduleEventListeners() {
     const editButtons = document.querySelectorAll('#todayScheduleList .btn-edit');
     const deleteButtons = document.querySelectorAll('#todayScheduleList .btn-delete');
     
-    console.log(`Configurando event listeners: ${editButtons.length} botões editar, ${deleteButtons.length} botões deletar`);
+    // Configurando event listeners
     
     editButtons.forEach(button => {
         const appointmentId = button.getAttribute('data-id');
         button.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log(`Botão editar clicado para ID: ${appointmentId}`);
+            // Botão editar clicado
             editAppointment(appointmentId);
         });
     });
@@ -912,7 +969,7 @@ function setupTodayScheduleEventListeners() {
         button.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            console.log(`Botão deletar clicado para ID: ${appointmentId}`);
+            // Botão deletar clicado
             deleteAppointment(appointmentId);
         });
     });
@@ -929,7 +986,7 @@ function getTimePeriod(appointment) {
 
 function setupScheduleFilters() {
     const filterButtons = document.querySelectorAll('.filter-btn');
-    console.log('Configurando filtros de turno. Botões encontrados:', filterButtons.length);
+    // Configurando filtros de turno
     
     if (filterButtons.length === 0) {
         console.warn('Nenhum botão de filtro encontrado');
@@ -938,7 +995,7 @@ function setupScheduleFilters() {
     
     filterButtons.forEach(button => {
         button.addEventListener('click', function() {
-            console.log('Filtro clicado:', this.getAttribute('data-period'));
+            // Filtro aplicado
             
             // Remover classe active de todos os botões
             filterButtons.forEach(btn => btn.classList.remove('active'));
@@ -996,40 +1053,63 @@ function renderScheduleGrid(appointments, selectedDate) {
 
     // Criar mapa de agendamentos por horário - apenas para a data selecionada
     const appointmentMap = {};
-    console.log('Todos os agendamentos:', appointments);
-    console.log('Data selecionada:', selectedDate);
     
     // Filtrar agendamentos para a data selecionada
     const dayAppointments = appointments.filter(appointment => {
         const appointmentDate = new Date(appointment.data_horario);
         const selectedDateObj = new Date(selectedDate + 'T00:00:00');
         
+        const aptDateStr = appointmentDate.toISOString().split('T')[0];
+        const selectedDateStr = selectedDate;
+        
+
+        
         // Comparar apenas a data (ano, mês, dia)
-        return appointmentDate.toDateString() === selectedDateObj.toDateString();
+        return aptDateStr === selectedDateStr;
     });
     
-    console.log('Agendamentos do dia filtrados:', dayAppointments);
-    
     dayAppointments.forEach(appointment => {
-        // Extrair horário do agendamento - pode vir de horario_inicio ou data_horario
-        let timeSlot;
+        // Extrair horário de início do agendamento
+        let startTime, endTime;
+        
         if (appointment.horario_inicio) {
-            timeSlot = formatTimeHHMM(appointment.horario_inicio);
+            startTime = formatTimeHHMM(appointment.horario_inicio);
+            endTime = appointment.horario_fim ? formatTimeHHMM(appointment.horario_fim) : null;
         } else if (appointment.data_horario) {
             // Extrair horário da data_horario
             const appointmentDate = new Date(appointment.data_horario);
             const hours = appointmentDate.getHours().toString().padStart(2, '0');
             const minutes = appointmentDate.getMinutes().toString().padStart(2, '0');
-            timeSlot = `${hours}:${minutes}`;
+            startTime = `${hours}:${minutes}`;
+            
+            // Se não tem horario_fim, calcular baseado na duração padrão (30 min)
+            if (!appointment.horario_fim) {
+                const endDate = new Date(appointmentDate.getTime() + 30 * 60000); // +30 minutos
+                const endHours = endDate.getHours().toString().padStart(2, '0');
+                const endMinutes = endDate.getMinutes().toString().padStart(2, '0');
+                endTime = `${endHours}:${endMinutes}`;
+            } else {
+                endTime = formatTimeHHMM(appointment.horario_fim);
+            }
         }
         
-        if (timeSlot) {
-            appointmentMap[timeSlot] = appointment;
-            console.log(`Mapeando agendamento: ${timeSlot} -> ${appointment.nome_cliente}`);
+        if (startTime) {
+            // Marcar todos os slots ocupados durante o período do agendamento
+            const occupiedSlots = getOccupiedTimeSlots(startTime, endTime);
+            
+            occupiedSlots.forEach((slot, index) => {
+                // Criar uma cópia do agendamento com informações adicionais
+                const appointmentWithSlotInfo = {
+                    ...appointment,
+                    _slotStartTime: startTime,
+                    _slotEndTime: endTime,
+                    _isMainSlot: index === 0 // Primeiro slot é sempre o principal
+                };
+                
+                appointmentMap[slot] = appointmentWithSlotInfo;
+            });
         }
     });
-    
-    console.log('Mapa de agendamentos final:', appointmentMap);
 
     // Calcular estatísticas baseadas nos agendamentos do dia
     const totalSlots = isClosed ? 0 : (workingHours.morning.length + workingHours.afternoon.length);
@@ -1098,10 +1178,35 @@ function renderScheduleGrid(appointments, selectedDate) {
                         const appointment = appointmentMap[time];
                         const status = appointment ? 'occupied' : 'available';
                         
+                        let timeDisplay = time;
+                        let clientDisplay = '';
+                        let isMainSlot = false;
+                        
+                        if (appointment) {
+                            // Usar a informação de slot principal/secundário que foi definida no mapeamento
+                            isMainSlot = appointment._isMainSlot || false;
+                            
+                            if (isMainSlot) {
+                                // Slot principal: mostrar período completo e nome do cliente
+                                if (appointment._slotEndTime) {
+                                    timeDisplay = `${appointment._slotStartTime} - ${appointment._slotEndTime}`;
+                                } else {
+                                    timeDisplay = time;
+                                }
+                                clientDisplay = `<div class="slot-client">${appointment.cliente_nome}</div>`;
+                            } else {
+                                // Slot secundário: mostrar apenas que está ocupado
+                                timeDisplay = time;
+                                clientDisplay = `<div class="slot-client">Ocupado</div>`;
+                            }
+                        }
+                        
+                        const slotClass = appointment ? (isMainSlot ? 'main-slot' : 'secondary-slot') : '';
+                        
                         return `
-                            <div class="time-slot ${status}" data-time="${time}" onclick="handleTimeSlotClick('${time}', '${selectedDate}', ${appointment ? 'true' : 'false'})">
-                                <div class="slot-time">${time}</div>
-                                ${appointment ? `<div class="slot-client">${appointment.nome_cliente}</div>` : ''}
+                            <div class="time-slot ${status} ${slotClass}" data-time="${time}" onclick="handleTimeSlotClick('${time}', '${selectedDate}', ${appointment ? 'true' : 'false'})">
+                                <div class="slot-time">${timeDisplay}</div>
+                                ${clientDisplay}
                             </div>
                         `;
                     }).join('')}
@@ -1115,10 +1220,35 @@ function renderScheduleGrid(appointments, selectedDate) {
                         const appointment = appointmentMap[time];
                         const status = appointment ? 'occupied' : 'available';
                         
+                        let timeDisplay = time;
+                        let clientDisplay = '';
+                        let isMainSlot = false;
+                        
+                        if (appointment) {
+                            // Usar a informação de slot principal/secundário que foi definida no mapeamento
+                            isMainSlot = appointment._isMainSlot || false;
+                            
+                            if (isMainSlot) {
+                                // Slot principal: mostrar período completo e nome do cliente
+                                if (appointment._slotEndTime) {
+                                    timeDisplay = `${appointment._slotStartTime} - ${appointment._slotEndTime}`;
+                                } else {
+                                    timeDisplay = time;
+                                }
+                                clientDisplay = `<div class="slot-client">${appointment.cliente_nome}</div>`;
+                            } else {
+                                // Slot secundário: mostrar apenas que está ocupado
+                                timeDisplay = time;
+                                clientDisplay = `<div class="slot-client">Ocupado</div>`;
+                            }
+                        }
+                        
+                        const slotClass = appointment ? (isMainSlot ? 'main-slot' : 'secondary-slot') : '';
+                        
                         return `
-                            <div class="time-slot ${status}" data-time="${time}" onclick="handleTimeSlotClick('${time}', '${selectedDate}', ${appointment ? 'true' : 'false'})">
-                                <div class="slot-time">${time}</div>
-                                ${appointment ? `<div class="slot-client">${appointment.nome_cliente}</div>` : ''}
+                            <div class="time-slot ${status} ${slotClass}" data-time="${time}" onclick="handleTimeSlotClick('${time}', '${selectedDate}', ${appointment ? 'true' : 'false'})">
+                                <div class="slot-time">${timeDisplay}</div>
+                                ${clientDisplay}
                             </div>
                         `;
                     }).join('')}
@@ -1165,33 +1295,110 @@ function renderClientsGrid(clients) {
 }
 
 function renderReports(data) {
+    // Renderizando relatórios
+    
+    // Verificar se os elementos existem
+    const revenueChart = document.getElementById('revenueChart');
+    const servicesChart = document.getElementById('servicesChart');
+    const generalStats = document.getElementById('generalStats');
+    
+    // Verificando elementos do DOM
+    
+    if (!revenueChart || !servicesChart || !generalStats) {
+        console.error('Elementos dos relatórios não encontrados no DOM');
+        return;
+    }
+    
     // Estatísticas por status
     const statusStats = {};
+    let totalRevenue = 0;
+    let totalPaid = 0;
+    let totalPending = 0;
+    
     data.forEach(appointment => {
         statusStats[appointment.status] = (statusStats[appointment.status] || 0) + 1;
+        const preco = parseFloat(appointment.preco_cobrado) || 0;
+        
+        // Faturamento total considera apenas agendamentos concluídos
+        if (appointment.status === 'concluido') {
+            totalRevenue += preco;
+            
+            if (appointment.pagamento === 'pago') {
+                totalPaid += preco;
+            } else if (appointment.pagamento === 'pendente') {
+                totalPending += preco;
+            }
+        }
     });
     
-    const summaryContainer = document.getElementById('reportSummary');
-    summaryContainer.innerHTML = '';
+    // Estatísticas por serviço
+    const serviceStats = {};
+    data.forEach(appointment => {
+        const servico = appointment.servico || 'Não informado';
+        serviceStats[servico] = (serviceStats[servico] || 0) + 1;
+    });
     
-    Object.entries(statusStats).forEach(([status, count]) => {
-        const item = document.createElement('div');
-        item.className = 'summary-item';
-        item.innerHTML = `
-            <span class="summary-label">${status.charAt(0).toUpperCase() + status.slice(1)}:</span>
-            <span class="summary-value">${count}</span>
+    // Atualizar gráfico de faturamento
+    if (revenueChart) {
+        revenueChart.innerHTML = `
+            <div class="chart-item">
+                <div class="chart-label">Faturamento Total</div>
+                <div class="chart-value">R$ ${totalRevenue.toFixed(2)}</div>
+            </div>
+            <div class="chart-item">
+                <div class="chart-label">Recebido</div>
+                <div class="chart-value success">R$ ${totalPaid.toFixed(2)}</div>
+            </div>
+            <div class="chart-item">
+                <div class="chart-label">Pendente</div>
+                <div class="chart-value warning">R$ ${totalPending.toFixed(2)}</div>
+            </div>
         `;
-        summaryContainer.appendChild(item);
-    });
+    }
     
-    // Total de agendamentos
-    const totalItem = document.createElement('div');
-    totalItem.className = 'summary-item';
-    totalItem.innerHTML = `
-        <span class="summary-label">Total de Agendamentos:</span>
-        <span class="summary-value">${data.length}</span>
-    `;
-    summaryContainer.appendChild(totalItem);
+    // Atualizar gráfico de serviços
+    if (servicesChart) {
+        const topServices = Object.entries(serviceStats)
+            .sort(([,a], [,b]) => b - a)
+            .slice(0, 5);
+        
+        servicesChart.innerHTML = topServices.map(([service, count]) => `
+            <div class="chart-item">
+                <div class="chart-label">${service}</div>
+                <div class="chart-value">${count} agendamentos</div>
+            </div>
+        `).join('');
+    }
+    
+    // Atualizar estatísticas gerais
+    if (generalStats) {
+        generalStats.innerHTML = `
+            <div class="stat-item">
+                <div class="stat-label">Total de Agendamentos</div>
+                <div class="stat-value">${data.length}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Agendados</div>
+                <div class="stat-value">${statusStats.agendado || 0}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Confirmados</div>
+                <div class="stat-value">${statusStats.confirmado || 0}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Concluídos</div>
+                <div class="stat-value">${statusStats.concluido || 0}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Cancelados</div>
+                <div class="stat-value">${statusStats.cancelado || 0}</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Taxa de Conclusão</div>
+                <div class="stat-value">${data.length > 0 ? ((statusStats.concluido || 0) / data.length * 100).toFixed(1) : 0}%</div>
+            </div>
+        `;
+    }
 }
 
 // Utilitários
@@ -1231,45 +1438,32 @@ function setDateToTomorrow(inputId = 'scheduleDate') {
     }
 }
 
-function filterClients() {
-    const searchTerm = document.getElementById('clientSearch').value.toLowerCase();
+// Função otimizada com debounce para filtrar clientes
+const debouncedFilterClients = debounce(() => {
+    const searchTerm = document.getElementById('clientSearch')?.value?.toLowerCase() || '';
     const clientCards = document.querySelectorAll('.client-card');
     
     clientCards.forEach(card => {
-        const clientName = card.querySelector('.client-name').textContent.toLowerCase();
-        const clientPhone = card.querySelector('.client-phone').textContent.toLowerCase();
+        const clientName = card.querySelector('.client-name')?.textContent?.toLowerCase() || '';
+        const clientPhone = card.querySelector('.client-phone')?.textContent?.toLowerCase() || '';
         
-        if (clientName.includes(searchTerm) || clientPhone.includes(searchTerm)) {
-            card.style.display = 'block';
-        } else {
-            card.style.display = 'none';
-        }
+        const shouldShow = !searchTerm || clientName.includes(searchTerm) || clientPhone.includes(searchTerm);
+        card.style.display = shouldShow ? 'block' : 'none';
     });
+}, 300);
+
+// Função legacy mantida para compatibilidade
+function filterClients() {
+    debouncedFilterClients();
 }
 
 function updateReportData() {
     loadReports();
 }
 
-function generateReport() {
-    loadReports();
-}
-
 function filterAppointments() {
     const searchTerm = document.getElementById('searchInput')?.value?.toLowerCase() || '';
     // Esta função pode ser implementada se necessário
-}
-
-function generateReport() {
-    const startDate = document.getElementById('reportStartDate').value;
-    const endDate = document.getElementById('reportEndDate').value;
-    
-    if (!startDate || !endDate) {
-        alert('Por favor, selecione as datas de início e fim do relatório.');
-        return;
-    }
-    
-    loadReports();
 }
 
 function updateReportData() {
@@ -1284,44 +1478,8 @@ function updateReportData() {
 // Modal de edição
 async function editAppointment(id) {
     if (!supabaseClient) {
-        // Modo exemplo - buscar nos dados locais
-        const appointment = appointments.find(apt => apt.id == id);
-        if (!appointment) {
-            alert('Agendamento não encontrado');
-            return;
-        }
-        
-        // Preencher campos do modal
-        document.getElementById('editId').value = appointment.id;
-        
-        // Extrair data e horário do timestamp
-        const appointmentDate = new Date(appointment.data_horario);
-        document.getElementById('editData').value = appointmentDate.toISOString().split('T')[0];
-        
-        // Garantir formato HH:MM para o horário
-        let timeValue = appointment.horario_inicio;
-        if (!timeValue) {
-            const hours = appointmentDate.getHours().toString().padStart(2, '0');
-            const minutes = appointmentDate.getMinutes().toString().padStart(2, '0');
-            timeValue = `${hours}:${minutes}`;
-        }
-        // Remover segundos se existirem (formato HH:MM:SS -> HH:MM)
-        if (timeValue.includes(':') && timeValue.split(':').length === 3) {
-            timeValue = timeValue.substring(0, 5);
-        }
-        document.getElementById('editHorario').value = timeValue;
-        
-        // Preencher nome e telefone do cliente
-        document.getElementById('editNome').value = appointment.nome_cliente || '';
-        document.getElementById('editTelefone').value = appointment.telefone || '';
-        
-        document.getElementById('editServico').value = appointment.servico || '';
-        document.getElementById('editStatus').value = appointment.status || 'agendado';
-        document.getElementById('editObservacoes').value = appointment.observacoes || '';
-        document.getElementById('editPreco').value = appointment.preco || '';
-        
-        // Mostrar modal
-        document.getElementById('editModal').style.display = 'block';
+        console.error('❌ Supabase não configurado - não é possível editar agendamento');
+        alert('Erro: Supabase não configurado. Configure o arquivo config.js');
         return;
     }
     
@@ -1343,27 +1501,41 @@ async function editAppointment(id) {
         const appointmentDate = new Date(appointment.data_horario);
         document.getElementById('editData').value = appointmentDate.toISOString().split('T')[0];
         
-        // Garantir formato HH:MM para o horário
-        let timeValue = appointment.horario_inicio;
-        if (!timeValue) {
+        // Garantir formato HH:MM para o horário de início
+        let timeStartValue = appointment.horario_inicio;
+        if (!timeStartValue) {
             const hours = appointmentDate.getHours().toString().padStart(2, '0');
             const minutes = appointmentDate.getMinutes().toString().padStart(2, '0');
-            timeValue = `${hours}:${minutes}`;
+            timeStartValue = `${hours}:${minutes}`;
         }
         // Remover segundos se existirem (formato HH:MM:SS -> HH:MM)
-        if (timeValue.includes(':') && timeValue.split(':').length === 3) {
-            timeValue = timeValue.substring(0, 5);
+        if (timeStartValue.includes(':') && timeStartValue.split(':').length === 3) {
+            timeStartValue = timeStartValue.substring(0, 5);
         }
-        document.getElementById('editHorario').value = timeValue;
+        document.getElementById('editHorarioInicio').value = timeStartValue;
+        
+        // Garantir formato HH:MM para o horário de fim
+        let timeEndValue = appointment.horario_fim;
+        if (!timeEndValue) {
+            // Se não tiver horário de fim, calcular baseado no início + 30 min
+            timeEndValue = calculateEndTime(timeStartValue, 30);
+        }
+        // Remover segundos se existirem (formato HH:MM:SS -> HH:MM)
+        if (timeEndValue.includes(':') && timeEndValue.split(':').length === 3) {
+            timeEndValue = timeEndValue.substring(0, 5);
+        }
+        document.getElementById('editHorarioFim').value = timeEndValue;
         
         // Preencher nome e telefone do cliente
-        document.getElementById('editNome').value = appointment.nome_cliente || '';
+        document.getElementById('editNome').value = appointment.cliente_nome || '';
         document.getElementById('editTelefone').value = appointment.telefone || '';
         
         document.getElementById('editServico').value = appointment.servico || '';
         document.getElementById('editStatus').value = appointment.status || 'agendado';
         document.getElementById('editObservacoes').value = appointment.observacoes || '';
-        document.getElementById('editPreco').value = appointment.preco || '';
+        document.getElementById('editPreco').value = appointment.preco_cobrado || '';
+        document.getElementById('editFormaPagamento').value = appointment.forma_pagamento || '';
+        document.getElementById('editPagamento').value = appointment.pagamento || '';
         
         // Mostrar modal
         document.getElementById('editModal').style.display = 'block';
@@ -1374,7 +1546,7 @@ async function editAppointment(id) {
 }
 
 async function saveAppointment() {
-    console.log('=== INICIANDO SAVE APPOINTMENT ===');
+    // Salvando agendamento...
     
     try {
         // Obter dados do formulário
@@ -1382,109 +1554,91 @@ async function saveAppointment() {
         const clienteNome = document.getElementById('editNome').value.trim();
         const clienteTelefone = document.getElementById('editTelefone').value.trim();
         const data = document.getElementById('editData').value;
-        const horario = document.getElementById('editHorario').value;
+        const horarioInicio = document.getElementById('editHorarioInicio').value;
+        const horarioFim = document.getElementById('editHorarioFim').value;
         const servico = document.getElementById('editServico').value;
         const status = document.getElementById('editStatus').value;
         const observacoes = document.getElementById('editObservacoes').value.trim();
-        const preco = parseFloat(document.getElementById('editPreco')?.value || 0);
+        const precoElement = document.getElementById('editPreco');
+        const precoValue = precoElement?.value;
+        const preco = parseFloat(precoValue || 0);
+        const formaPagamento = document.getElementById('editFormaPagamento').value;
+        const pagamento = document.getElementById('editPagamento').value;
         
-        console.log('Dados do formulário:', { id, clienteNome, clienteTelefone, data, horario, servico, status, preco });
+        // Validando dados do formulário
         
         // Validações básicas
-        if (!id || !clienteNome || !data || !horario || !servico) {
-            console.log('Validação falhou - campos obrigatórios vazios');
+        if (!id || !clienteNome || !data || !horarioInicio || !horarioFim || !servico) {
+            // Validação falhou - campos obrigatórios
             alert('Por favor, preencha todos os campos obrigatórios.');
             return;
         }
         
-        // Validar formato do horário (HH:MM)
+        // Validar formato dos horários (HH:MM)
         const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-        if (!timeRegex.test(horario)) {
-            console.log('Validação falhou - formato de horário inválido:', horario);
+        if (!timeRegex.test(horarioInicio) || !timeRegex.test(horarioFim)) {
+            // Validação falhou - formato de horário inválido
             alert('Formato de horário inválido. Use HH:MM (ex: 14:30)');
             return;
         }
         
+        // Validar se horário de fim é posterior ao de início
+        if (horarioFim <= horarioInicio) {
+            alert('O horário de fim deve ser posterior ao horário de início.');
+            return;
+        }
+        
         // Combinar data e horário em um timestamp válido
-        const dataHorario = new Date(`${data}T${horario}:00`);
-        console.log('Data/horário combinados:', dataHorario);
+        const dataHorario = new Date(`${data}T${horarioInicio}:00`);
+        // Data/horário validados
         
         // Verificar se a data é válida
         if (isNaN(dataHorario.getTime())) {
-            console.log('Data/horário inválido:', data, horario);
+            // Data/horário inválido
             alert('Data ou horário inválido');
             return;
         }
         
-        // Calcular horário de fim baseado na duração do serviço (30 min padrão)
-        const horarioFim = calculateEndTime(horario, 30);
-        
         if (!supabaseClient) {
-            console.log('Modo exemplo - salvando dados locais');
-            
-            // Encontrar e atualizar o agendamento
-            const appointmentIndex = appointments.findIndex(apt => apt.id == id);
-            if (appointmentIndex === -1) {
-                console.log('Agendamento não encontrado com ID:', id);
-                alert('Agendamento não encontrado');
-                return;
-            }
-            
-            // Atualizar o agendamento
-            const updatedAppointment = {
-                ...appointments[appointmentIndex],
-                telefone: normalizePhone(clienteTelefone),
-                nome_cliente: clienteNome,
-                servico: servico,
-                data_horario: dataHorario.toISOString(),
-                horario_inicio: horario,
-                horario_fim: horarioFim,
-                preco: preco,
-                status: status,
-                observacoes: observacoes || null
-            };
-            
-            console.log('Agendamento atualizado:', updatedAppointment);
-            appointments[appointmentIndex] = updatedAppointment;
-            
-            // Atualizar agendamentos de hoje se necessário
-            const today = new Date().toISOString().split('T')[0];
-            if (data === today) {
-                const todayIndex = todayAppointments.findIndex(apt => apt.id == id);
-                if (todayIndex !== -1) {
-                    todayAppointments[todayIndex] = updatedAppointment;
-                } else {
-                    todayAppointments.push(updatedAppointment);
-                }
-            }
-            
-            closeModal();
-            renderAppointmentsTable();
-            renderTodaySchedule();
-            loadScheduleGrid();
-            
-            alert('Agendamento atualizado com sucesso!');
-            console.log('=== SAVE APPOINTMENT CONCLUÍDO COM SUCESSO (EXEMPLO) ===');
+            console.error('❌ Supabase não configurado - não é possível salvar agendamento');
+            alert('Erro: Supabase não configurado. Configure o arquivo config.js');
             return;
         }
         
-        console.log('Modo Supabase - salvando no banco');
+        // Salvando no Supabase
+        
+        // Verificar conflitos de horário no Supabase (excluindo o próprio agendamento)
+        const conflictCheck = await checkTimeConflictSupabase(data, horarioInicio, horarioFim, id);
+        if (conflictCheck.conflict) {
+            alert(`Este horário conflita com o agendamento de ${conflictCheck.conflictWith.cliente_nome} (${conflictCheck.conflictWith.horario_inicio} - ${conflictCheck.conflictWith.horario_fim}). Por favor, escolha outro horário.`);
+            return;
+        }
+        
+        // Buscar ou criar cliente
+        const cliente = await findOrCreateClient(clienteNome, clienteTelefone);
+        if (!cliente) {
+            throw new Error('Erro ao processar dados do cliente');
+        }
+        
+        // Buscar serviço
+        const servicoData = services.find(s => s.nome === servico);
+        if (!servicoData) {
+            throw new Error('Serviço não encontrado');
+        }
         
         // Preparar dados para o Supabase
         const updatedData = {
-            telefone: normalizePhone(clienteTelefone),
-            nome_cliente: clienteNome,
-            servico: servico,
+            cliente_id: cliente.id,
+            servico_id: servicoData.id,
             data_horario: dataHorario.toISOString(),
-            horario_inicio: horario,
+            horario_inicio: horarioInicio,
             horario_fim: horarioFim,
-            preco: preco,
+            preco_cobrado: preco,
             status: status,
-            observacoes: observacoes || null,
-            atualizado_em: new Date().toISOString()
+            observacoes: observacoes || null
         };
         
-        console.log('Dados para atualização (Supabase):', updatedData);
+        // Dados preparados para atualização
         
         const { data: result, error } = await supabaseClient
             .from('agendamentos')
@@ -1492,12 +1646,49 @@ async function saveAppointment() {
             .eq('id', parseInt(id))
             .select();
         
+        // Se o agendamento foi concluído e há valor a pagar, criar registro de pagamento
+        if (status === 'concluido' && preco > 0) {
+            const valorPago = pagamento === 'pago' ? preco : 0;
+            const valorPendente = preco - valorPago;
+            
+            // Verificar se já existe um pagamento para este agendamento
+            const { data: existingPayment } = await supabaseClient
+                .from('pagamentos')
+                .select('id')
+                .eq('agendamento_id', parseInt(id))
+                .single();
+            
+            const paymentData = {
+                agendamento_id: parseInt(id),
+                cliente_id: cliente.id,
+                valor_total: preco,
+                valor_pago: valorPago,
+                valor_pendente: valorPendente,
+                status: pagamento === 'pago' ? 'pago' : 'pendente',
+                forma_pagamento: formaPagamento || null,
+                data_pagamento: pagamento === 'pago' ? new Date().toISOString() : null
+            };
+            
+            if (existingPayment) {
+                // Atualizar pagamento existente
+                await supabaseClient
+                    .from('pagamentos')
+                    .update(paymentData)
+                    .eq('id', existingPayment.id);
+            } else {
+                // Criar novo pagamento
+                await supabaseClient
+                    .from('pagamentos')
+                    .insert(paymentData);
+            }
+        }
+        
         if (error) {
-            console.error('Erro do Supabase:', error);
+            // Erro do Supabase
             throw error;
         }
         
-        console.log('Resultado da atualização:', result);
+        // Atualização concluída
         
         closeModal();
         loadAppointments();
@@ -1506,7 +1697,7 @@ async function saveAppointment() {
         loadScheduleGrid();
         
         alert('Agendamento atualizado com sucesso!');
-        console.log('=== SAVE APPOINTMENT CONCLUÍDO COM SUCESSO (SUPABASE) ===');
+        // Agendamento salvo com sucesso
         
     } catch (error) {
         console.error('Erro ao salvar agendamento:', error);
@@ -1519,43 +1710,16 @@ async function deleteAppointment(id) {
         return;
     }
     
-    console.log('=== INICIANDO DELETE APPOINTMENT ===', id);
+    // Excluindo agendamento...
     
     try {
         if (!supabaseClient) {
-            console.log('Modo exemplo - excluindo dos dados locais');
-            
-            // Encontrar e remover o agendamento
-            const appointmentIndex = appointments.findIndex(apt => apt.id == id);
-            if (appointmentIndex === -1) {
-                alert('Agendamento não encontrado');
-                return;
-            }
-            
-            console.log('Agendamento encontrado no índice:', appointmentIndex);
-            
-            // Remover dos arrays
-            appointments.splice(appointmentIndex, 1);
-            
-            // Remover dos agendamentos de hoje se necessário
-            const todayIndex = todayAppointments.findIndex(apt => apt.id == id);
-            if (todayIndex !== -1) {
-                todayAppointments.splice(todayIndex, 1);
-                console.log('Agendamento removido dos agendamentos de hoje');
-            }
-            
-            renderAppointmentsTable();
-            renderTodaySchedule();
-            loadScheduleGrid();
-            loadOverviewData();
-            
-            alert('Agendamento excluído com sucesso!');
-            console.log('=== DELETE APPOINTMENT CONCLUÍDO COM SUCESSO (EXEMPLO) ===');
+            console.error('❌ Supabase não configurado - não é possível excluir agendamento');
+            alert('Erro: Supabase não configurado. Configure o arquivo config.js');
             return;
         }
         
-        console.log('Modo Supabase - excluindo do banco');
-        console.log('ID para exclusão:', id, 'Tipo:', typeof id);
+        // Excluindo do Supabase
         
         const { data: result, error } = await supabaseClient
             .from('agendamentos')
@@ -1563,11 +1727,11 @@ async function deleteAppointment(id) {
             .eq('id', parseInt(id));
         
         if (error) {
-            console.error('Erro do Supabase:', error);
+            // Erro do Supabase
             throw error;
         }
         
-        console.log('Resultado da exclusão:', result);
+        // Exclusão concluída
         
         // Recarregar todas as visualizações
         await loadAppointments();
@@ -1577,7 +1741,7 @@ async function deleteAppointment(id) {
         await loadAllClients(); // Recarregar clientes também
         
         alert('Agendamento excluído com sucesso!');
-        console.log('=== DELETE APPOINTMENT CONCLUÍDO COM SUCESSO (SUPABASE) ===');
+        // Agendamento excluído com sucesso
         
     } catch (error) {
         console.error('Erro ao excluir agendamento:', error);
@@ -1591,47 +1755,62 @@ async function deleteClient(telefone) {
         return;
     }
     
-    console.log('=== INICIANDO DELETE CLIENT ===', telefone);
+    // Excluindo cliente...
     
     try {
         if (!supabaseClient) {
-            console.log('Modo exemplo - excluindo cliente dos dados locais');
-            
-            // Remover cliente da lista
-            const clientIndex = allClients.findIndex(client => phonesMatch(client.telefone, telefone));
-            if (clientIndex !== -1) {
-                allClients.splice(clientIndex, 1);
-            }
-            
-            // Remover agendamentos do cliente
-            appointments = appointments.filter(apt => !phonesMatch(apt.telefone, telefone));
-            todayAppointments = todayAppointments.filter(apt => !phonesMatch(apt.telefone, telefone));
-            
-            // Recarregar visualizações
-            renderAppointmentsTable();
-            renderTodaySchedule();
-            loadScheduleGrid();
-            loadOverviewData();
-            loadClients();
-            
-            alert('Cliente excluído com sucesso!');
+            console.error('❌ Supabase não configurado - não é possível excluir cliente');
+            alert('Erro: Supabase não configurado. Configure o arquivo config.js');
             return;
         }
         
-        console.log('Modo Supabase - excluindo cliente do banco');
+        // Excluindo cliente do Supabase
         
-        // Normalizar telefone para busca
+        // Buscar cliente pelo telefone
         const normalizedPhone = normalizePhone(telefone);
+        const { data: clientData, error: clientError } = await supabaseClient
+            .from('clientes')
+            .select('id')
+            .eq('telefone', normalizedPhone)
+            .single();
         
-        // Excluir todos os agendamentos do cliente
-        const { error: appointmentsError } = await supabaseClient
-            .from('agendamentos')
-            .delete()
-            .eq('telefone', normalizedPhone);
+        if (clientError && clientError.code !== 'PGRST116') { // PGRST116 = not found
+            throw clientError;
+        }
         
-        if (appointmentsError) {
-            console.error('Erro ao excluir agendamentos:', appointmentsError);
-            throw appointmentsError;
+        if (clientData) {
+            // Excluir todos os agendamentos do cliente
+            const { error: appointmentsError } = await supabaseClient
+                .from('agendamentos')
+                .delete()
+                .eq('cliente_id', clientData.id);
+            
+            if (appointmentsError) {
+                console.error('Erro ao excluir agendamentos:', appointmentsError);
+                throw appointmentsError;
+            }
+            
+            // Excluir pagamentos do cliente
+            const { error: paymentsError } = await supabaseClient
+                .from('pagamentos')
+                .delete()
+                .eq('cliente_id', clientData.id);
+            
+            if (paymentsError) {
+                console.error('Erro ao excluir pagamentos:', paymentsError);
+                // Não falhar se não conseguir excluir pagamentos
+            }
+            
+            // Excluir cliente
+            const { error: deleteClientError } = await supabaseClient
+                .from('clientes')
+                .delete()
+                .eq('id', clientData.id);
+            
+            if (deleteClientError) {
+                console.error('Erro ao excluir cliente:', deleteClientError);
+                throw deleteClientError;
+            }
         }
         
         // Recarregar todas as visualizações
@@ -1643,7 +1822,7 @@ async function deleteClient(telefone) {
         await loadClients();
         
         alert('Cliente e todos os seus agendamentos foram excluídos com sucesso!');
-        console.log('=== DELETE CLIENT CONCLUÍDO COM SUCESSO ===');
+        // Cliente excluído com sucesso
         
     } catch (error) {
         console.error('Erro ao excluir cliente:', error);
@@ -1678,47 +1857,23 @@ let selectedClientId = null;
 // Função para carregar todos os clientes
 async function loadAllClients() {
     if (!supabaseClient) {
-        console.warn('Supabase não configurado - usando dados de exemplo para clientes');
-        allClients = [
-            { id: 1, nome: 'João Silva', telefone: '(11) 99999-9999' },
-            { id: 2, nome: 'Pedro Santos', telefone: '(11) 88888-8888' }
-        ];
-        return;
+        console.error('❌ Supabase não configurado - não é possível carregar clientes');
+        return [];
     }
     
     try {
-        // Buscar clientes únicos da tabela de agendamentos
+        // Buscar clientes da tabela clientes
         const { data, error } = await supabaseClient
-            .from('agendamentos')
-            .select('nome_cliente, telefone')
-            .order('nome_cliente');
+            .from('clientes')
+            .select('id, nome, telefone, email')
+            .order('nome');
         
         if (error) throw error;
         
-        // Criar lista de clientes únicos baseada no telefone normalizado
-        const uniqueClients = [];
-        const seenPhones = new Set();
-        
-        data?.forEach((appointment, index) => {
-            if (appointment.telefone) {
-                const normalizedPhone = normalizePhone(appointment.telefone);
-                
-                if (!seenPhones.has(normalizedPhone)) {
-                    seenPhones.add(normalizedPhone);
-                    uniqueClients.push({
-                        id: index + 1, // ID temporário
-                        nome: appointment.nome_cliente,
-                        telefone: normalizedPhone, // Usar telefone normalizado
-                        originalPhone: appointment.telefone // Manter original para referência
-                    });
-                }
-            }
-        });
-        
-        allClients = uniqueClients;
+        return data || [];
     } catch (error) {
         console.error('Erro ao carregar clientes:', error);
-        allClients = [];
+        return [];
     }
 }
 
@@ -1834,15 +1989,16 @@ async function getClientNameByPhone(phone) {
     }
     
     try {
+        const normalizedPhone = normalizePhone(phone);
         const { data, error } = await supabaseClient
-            .from('agendamentos')
-            .select('nome_cliente')
-            .eq('telefone', phone)
+            .from('clientes')
+            .select('nome')
+            .eq('telefone', normalizedPhone)
             .limit(1)
             .single();
         
         if (error) throw error;
-        return data?.nome_cliente || `Cliente: ${phone}`;
+        return data?.nome || `Cliente: ${phone}`;
     } catch (error) {
         console.error('Erro ao buscar nome do cliente:', error);
         return `Cliente: ${phone}`;
@@ -1883,10 +2039,7 @@ function renderClientsGrid(clients) {
     });
 }
 
-function renderReports(data) {
-    // Implementar renderização de relatórios
-    console.log('Renderizando relatórios com dados:', data);
-}
+
 
 // Função para mostrar notificações
 function showNotification(message, type = 'info') {
@@ -1922,7 +2075,8 @@ function openAddAppointmentModal() {
     document.getElementById('addNome').value = '';
     document.getElementById('addTelefone').value = '';
     document.getElementById('addServico').value = '';
-    document.getElementById('addHorario').value = '';
+    document.getElementById('addHorarioInicio').value = '';
+    document.getElementById('addHorarioFim').value = '';
     document.getElementById('addPreco').value = '';
     document.getElementById('addStatus').value = 'agendado';
     document.getElementById('addObservacoes').value = '';
@@ -1966,68 +2120,8 @@ async function addNewAppointment(event) {
     event.preventDefault();
     
     if (!supabaseClient) {
-        // Modo exemplo - adicionar aos dados locais
-        const clienteNome = document.getElementById('addNome').value.trim();
-        const clienteTelefone = document.getElementById('addTelefone').value.trim();
-        const servico = document.getElementById('addServico').value;
-        const data = document.getElementById('addData').value;
-        const horario = document.getElementById('addHorario').value;
-        const preco = parseFloat(document.getElementById('addPreco').value) || 0;
-        const status = document.getElementById('addStatus').value;
-        const observacoes = document.getElementById('addObservacoes').value.trim();
-        
-        // Validações
-        if (!clienteNome || !servico || !data || !horario) {
-            alert('Por favor, preencha todos os campos obrigatórios.');
-            return;
-        }
-        
-        // Verificar se o horário já está ocupado nos dados locais
-        const dataHorario = new Date(`${data}T${horario}:00`);
-        const existingAppointment = appointments.find(apt => {
-            const aptDate = new Date(apt.data_horario);
-            return aptDate.toDateString() === dataHorario.toDateString() && 
-                   apt.horario_inicio === horario;
-        });
-        
-        if (existingAppointment) {
-            alert('Este horário já está ocupado. Por favor, escolha outro horário.');
-            return;
-        }
-        
-        // Criar novo agendamento
-        // Calcular horário de fim baseado na duração do serviço (30 min padrão)
-        const horarioFim = calculateEndTime(horario, 30);
-        
-        const newAppointment = {
-            id: Date.now(), // ID temporário
-            telefone: normalizePhone(clienteTelefone),
-            nome_cliente: clienteNome,
-            servico: servico,
-            data_horario: dataHorario.toISOString(),
-            horario_inicio: horario,
-            horario_fim: horarioFim,
-            preco: preco,
-            status: status,
-            observacoes: observacoes || null
-        };
-        
-        // Adicionar aos dados locais
-        appointments.push(newAppointment);
-        
-        // Atualizar agendamentos de hoje se for hoje
-        const today = new Date().toISOString().split('T')[0];
-        if (data === today) {
-            todayAppointments.push(newAppointment);
-        }
-        
-        // Fechar modal e recarregar dados
-        closeAddModal();
-        renderAppointmentsTable();
-        renderTodaySchedule();
-        loadScheduleGrid();
-        
-        showNotification('Agendamento criado com sucesso!', 'success');
+        console.error('❌ Supabase não configurado - não é possível criar agendamento');
+        alert('Erro: Supabase não configurado. Configure o arquivo config.js');
         return;
     }
     
@@ -2036,55 +2130,63 @@ async function addNewAppointment(event) {
         const clienteTelefone = document.getElementById('addTelefone').value.trim();
         const servico = document.getElementById('addServico').value;
         const data = document.getElementById('addData').value;
-        const horario = document.getElementById('addHorario').value;
+        const horarioInicio = document.getElementById('addHorarioInicio').value;
+        const horarioFim = document.getElementById('addHorarioFim').value;
         const preco = parseFloat(document.getElementById('addPreco').value) || 0;
         const status = document.getElementById('addStatus').value;
         const observacoes = document.getElementById('addObservacoes').value.trim();
         
         // Validações
-        if (!clienteNome || !servico || !data || !horario) {
+        if (!clienteNome || !servico || !data || !horarioInicio || !horarioFim) {
             alert('Por favor, preencha todos os campos obrigatórios.');
             return;
         }
         
-        // Verificar se o horário já está ocupado
-        const { data: existingAppointments, error: checkError } = await supabaseClient
-            .from('agendamentos')
-            .select('id')
-            .gte('data_horario', `${data}T00:00:00`)
-            .lte('data_horario', `${data}T23:59:59`)
-            .eq('horario_inicio', horario);
-        
-        if (checkError) throw checkError;
-        
-        if (existingAppointments && existingAppointments.length > 0) {
-            alert('Este horário já está ocupado. Por favor, escolha outro horário.');
+        // Validar se horário de fim é posterior ao de início
+        if (horarioFim <= horarioInicio) {
+            alert('O horário de fim deve ser posterior ao horário de início.');
             return;
         }
         
-        // Combinar data e horário em um timestamp
-        const dataHorario = new Date(`${data}T${horario}:00`);
+        // Verificar conflitos de horário no Supabase
+        const conflictCheck = await checkTimeConflictSupabase(data, horarioInicio, horarioFim);
+        if (conflictCheck.conflict) {
+            alert(`Este horário conflita com o agendamento de ${conflictCheck.conflictWith.cliente_nome} (${conflictCheck.conflictWith.horario_inicio} - ${conflictCheck.conflictWith.horario_fim}). Por favor, escolha outro horário.`);
+            return;
+        }
         
-        // Calcular horário de fim baseado na duração do serviço (30 min padrão)
-        const horarioFim = calculateEndTime(horario, 30);
+        // Buscar ou criar cliente
+        const cliente = await findOrCreateClient(clienteNome, clienteTelefone);
+        if (!cliente) {
+            throw new Error('Erro ao processar dados do cliente');
+        }
+        
+        // Buscar serviço
+        const servicoData = services.find(s => s.nome === servico);
+        if (!servicoData) {
+            throw new Error('Serviço não encontrado');
+        }
+        
+        // Combinar data e horário em um timestamp
+        const dataHorario = new Date(`${data}T${horarioInicio}:00`);
         
         const newAppointment = {
-            telefone: normalizePhone(clienteTelefone),
-            nome_cliente: clienteNome,
-            servico: servico,
+            cliente_id: cliente.id,
+            servico_id: servicoData.id,
             data_horario: dataHorario.toISOString(),
-            horario_inicio: horario,
+            horario_inicio: horarioInicio,
             horario_fim: horarioFim,
-            preco: preco,
+            preco_cobrado: preco,
             status: status,
             observacoes: observacoes || null
         };
         
         console.log('Dados do agendamento:', newAppointment);
         
-        const { error } = await supabaseClient
+        const { data: insertedData, error } = await supabaseClient
             .from('agendamentos')
-            .insert([newAppointment]);
+            .insert([newAppointment])
+            .select();
         
         if (error) throw error;
         
@@ -2110,7 +2212,10 @@ function handleTimeSlotClick(time, date, isOccupied) {
 
     // Abrir modal de agendamento com horário pré-selecionado
     document.getElementById('addData').value = date;
-    document.getElementById('addHorario').value = time;
+    document.getElementById('addHorarioInicio').value = time;
+    // Calcular horário de fim (30 min depois por padrão)
+    const endTime = calculateEndTime(time, 30);
+    document.getElementById('addHorarioFim').value = endTime;
     document.getElementById('addNome').value = '';
     document.getElementById('addTelefone').value = '';
     document.getElementById('addServico').value = '';
@@ -2192,5 +2297,784 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    console.log('✅ Funções editAppointment e deleteAppointment disponíveis globalmente');
+    // Funções disponíveis globalmente
 });
+
+// ==================== FUNÇÕES PARA INADIMPLENTES ====================
+
+// Função para carregar clientes inadimplentes
+async function loadUnpaidClients() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado - não é possível carregar inadimplentes');
+        alert('Erro: Supabase não configurado. Configure o arquivo config.js');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        // Primeiro, atualizar a lista de inadimplentes
+        await updateUnpaidList();
+        
+        const filterClient = document.getElementById('unpaidClientFilter').value.trim();
+        
+        // Buscar inadimplentes com JOIN nas tabelas
+        let query = supabaseClient
+            .from('inadimplentes')
+            .select(`
+                *,
+                clientes!inner(nome, telefone),
+                agendamentos!inner(data_horario, servicos!inner(nome))
+            `)
+            .eq('status_cobranca', 'pendente')
+            .gt('valor_restante', 0)
+            .order('dias_atraso', { ascending: false });
+        
+        // Filtrar por cliente se especificado
+        if (filterClient) {
+            query = query.or(`clientes.nome.ilike.%${filterClient}%,clientes.telefone.ilike.%${filterClient}%`);
+        }
+        
+        const { data, error } = await query;
+        
+        if (error) throw error;
+        
+        const unpaidClients = data || [];
+        renderUnpaidTable(unpaidClients);
+        updateUnpaidSummary(unpaidClients);
+        
+    } catch (error) {
+        console.error('Erro ao carregar inadimplentes:', error);
+        showNotification('Erro ao carregar clientes inadimplentes: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para atualizar lista de inadimplentes no banco
+async function updateUnpaidList() {
+    if (!supabaseClient) return;
+    
+    try {
+        // Atualizar dias de atraso para todos os inadimplentes
+        const { error } = await supabaseClient
+            .from('inadimplentes')
+            .update({ 
+                dias_atraso: supabaseClient.raw('GREATEST(0, DATE_PART(\'day\', CURRENT_DATE - data_vencimento))')
+            })
+            .neq('status_cobranca', 'quitado');
+        
+        if (error) throw error;
+        // Lista atualizada com sucesso
+    } catch (error) {
+        console.error('Erro ao atualizar lista de inadimplentes:', error);
+    }
+}
+
+
+
+// Função para renderizar tabela de inadimplentes
+function renderUnpaidTable(unpaidClients) {
+    const tbody = document.getElementById('unpaidTableBody');
+    if (!tbody) return;
+    
+    if (unpaidClients.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align: center; padding: 2rem; color: rgba(255, 255, 255, 0.6);">
+                    <i class="fas fa-check-circle" style="font-size: 2rem; margin-bottom: 1rem; color: #4CAF50;"></i>
+                    <br>
+                    Nenhum cliente inadimplente encontrado!
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    tbody.innerHTML = unpaidClients.map(client => {
+        const serviceDate = new Date(client.agendamentos.data_horario);
+        const overdueClass = client.dias_atraso > 30 ? 'critical' : '';
+        
+        return `
+            <tr>
+                <td>${client.clientes.nome}</td>
+                <td>${formatPhoneDisplay(client.clientes.telefone)}</td>
+                <td>${client.agendamentos.servicos.nome}</td>
+                <td>${serviceDate.toLocaleDateString('pt-BR')}</td>
+                <td>R$ ${client.valor_devido.toFixed(2)}</td>
+                <td>
+                    <span class="overdue-days ${overdueClass}">
+                        ${client.dias_atraso} dias
+                    </span>
+                </td>
+                <td>
+                    <div class="unpaid-actions">
+                        <button class="mark-paid-btn" onclick="markAsPaid(${client.agendamento_id})">
+                            <i class="fas fa-check"></i>
+                            Marcar Pago
+                        </button>
+                        <button class="contact-btn" onclick="contactClient('${client.clientes.telefone}', '${client.clientes.nome}', ${client.agendamento_id})">
+                            <i class="fas fa-phone"></i>
+                            Contatar
+                        </button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Função para atualizar resumo de inadimplentes
+function updateUnpaidSummary(unpaidClients) {
+    const totalClients = unpaidClients.length;
+    // Usar valor_devido se disponível, senão usar preco_cobrado
+    const totalAmount = unpaidClients.reduce((sum, client) => {
+        const valor = client.valor_devido || client.preco_cobrado || 0;
+        return sum + parseFloat(valor);
+    }, 0);
+    
+    document.getElementById('totalUnpaidClients').textContent = totalClients;
+    document.getElementById('totalUnpaidAmount').textContent = `R$ ${totalAmount.toFixed(2)}`;
+    
+    // Remover a seção "Mais Antigo" - não é mais necessária
+    const oldestElement = document.getElementById('oldestUnpaid');
+    if (oldestElement) {
+        oldestElement.textContent = '-';
+    }
+}
+
+// Função para marcar como pago
+async function markAsPaid(appointmentId) {
+    if (!confirm('Confirma que este pagamento foi realizado?')) {
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        // Atualizar status do inadimplente para quitado
+        const { error: inadimplenteError } = await supabaseClient
+            .from('inadimplentes')
+            .update({ 
+                status_cobranca: 'quitado',
+                valor_pago: supabaseClient.raw('valor_devido')
+            })
+            .eq('agendamento_id', appointmentId);
+        
+        if (inadimplenteError) throw inadimplenteError;
+        
+        // Criar registro de pagamento
+        const { data: agendamento } = await supabaseClient
+            .from('agendamentos')
+            .select('preco_cobrado')
+            .eq('id', appointmentId)
+            .single();
+        
+        if (agendamento) {
+            await supabaseClient
+                .from('pagamentos')
+                .insert({
+                    agendamento_id: appointmentId,
+                    valor_pago: agendamento.preco_cobrado,
+                    forma_pagamento: 'dinheiro',
+                    status_pagamento: 'aprovado',
+                    data_pagamento: new Date().toISOString()
+                });
+        }
+        
+        showNotification('Pagamento marcado como realizado!', 'success');
+        loadUnpaidClients(); // Recarregar lista
+        
+    } catch (error) {
+        console.error('Erro ao marcar como pago:', error);
+        showNotification('Erro ao atualizar pagamento: ' + error.message, 'error');
+    }
+}
+
+// Função para contatar cliente
+async function contactClient(phone, name, appointmentId) {
+    const normalizedPhone = normalizePhone(phone);
+    const message = `Olá ${name}! Esperamos que esteja bem. Gostaríamos de lembrar sobre o pagamento pendente do seu último atendimento na Barbearia. Agradecemos a compreensão!`;
+    const whatsappUrl = `https://wa.me/55${normalizedPhone}?text=${encodeURIComponent(message)}`;
+    
+    // Registrar o contato no banco se estiver usando Supabase
+    if (supabaseClient && appointmentId) {
+        try {
+            await supabaseClient
+                .from('inadimplentes')
+                .update({ 
+                    tentativas_contato: supabaseClient.raw('tentativas_contato + 1'),
+                    ultimo_contato: new Date().toISOString()
+                })
+                .eq('agendamento_id', appointmentId);
+        } catch (error) {
+            console.error('Erro ao registrar contato:', error);
+        }
+    }
+    
+    window.open(whatsappUrl, '_blank');
+}
+
+// ==================== ATUALIZAÇÃO DOS MODAIS COM FORMA DE PAGAMENTO ====================
+
+// ==================== FUNÇÃO PARA VERIFICAR CONFLITOS DE HORÁRIO ====================
+
+// Função simplificada removida - usar checkTimeConflictSupabase
+
+// ==================== MODAL ADICIONAR INADIMPLENTE ====================
+
+// Função para abrir modal de adicionar inadimplente
+function openAddUnpaidModal() {
+    const modal = document.getElementById('addUnpaidModal');
+    modal.style.display = 'block';
+    
+    // Definir data padrão como hoje
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('addUnpaidData').value = today;
+    
+    // Limpar formulário
+    document.getElementById('addUnpaidForm').reset();
+    document.getElementById('addUnpaidData').value = today;
+}
+
+// Função para fechar modal de adicionar inadimplente
+function closeAddUnpaidModal() {
+    const modal = document.getElementById('addUnpaidModal');
+    modal.style.display = 'none';
+    
+    // Limpar formulário
+    document.getElementById('addUnpaidForm').reset();
+}
+
+// Função para atualizar preço do serviço no modal de inadimplente
+function updateUnpaidServicePrice() {
+    const servicoSelect = document.getElementById('addUnpaidServico');
+    const precoInput = document.getElementById('addUnpaidValor');
+    
+    const selectedOption = servicoSelect.options[servicoSelect.selectedIndex];
+    const price = selectedOption.getAttribute('data-price');
+    
+    if (price) {
+        precoInput.value = price;
+    }
+}
+
+// Função para adicionar cliente inadimplente
+async function addUnpaidClient(event) {
+    event.preventDefault();
+    
+    const clienteNome = document.getElementById('addUnpaidNome').value.trim();
+    const clienteTelefone = document.getElementById('addUnpaidTelefone').value.trim();
+    const servico = document.getElementById('addUnpaidServico').value;
+    const dataServico = document.getElementById('addUnpaidData').value;
+    const valorDevido = parseFloat(document.getElementById('addUnpaidValor').value) || 0;
+    const observacoes = document.getElementById('addUnpaidObservacoes').value.trim();
+    
+    // Validações
+    if (!clienteNome || !clienteTelefone || !servico || !dataServico || valorDevido <= 0) {
+        showNotification('Por favor, preencha todos os campos obrigatórios.', 'warning');
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        // Primeiro, verificar se o cliente já existe ou criar um novo
+        let clienteId;
+        const telefoneNormalizado = normalizePhone(clienteTelefone);
+        
+        // Buscar cliente existente
+        const { data: clienteExistente } = await supabaseClient
+            .from('clientes')
+            .select('id')
+            .eq('telefone', telefoneNormalizado)
+            .single();
+        
+        if (clienteExistente) {
+            clienteId = clienteExistente.id;
+        } else {
+            // Criar novo cliente
+            const { data: novoCliente, error: clienteError } = await supabaseClient
+                .from('clientes')
+                .insert([{
+                    nome: clienteNome,
+                    telefone: telefoneNormalizado,
+                    status_cliente: 'ativo'
+                }])
+                .select('id')
+                .single();
+            
+            if (clienteError) throw clienteError;
+            clienteId = novoCliente.id;
+        }
+        
+        // Buscar o serviço para obter o ID
+        const { data: servicoData, error: servicoError } = await supabaseClient
+            .from('servicos')
+            .select('id')
+            .eq('nome', servico)
+            .single();
+        
+        if (servicoError) throw servicoError;
+        
+        // Criar agendamento concluído
+        const dataHorario = new Date(`${dataServico}T12:00:00`);
+        
+        const agendamento = {
+            cliente_id: clienteId,
+            servico_id: servicoData.id,
+            data_horario: dataHorario.toISOString(),
+            horario_inicio: '12:00',
+            horario_fim: '13:00',
+            preco_cobrado: valorDevido,
+            status: 'concluido',
+            observacoes: observacoes || 'Inadimplente adicionado manualmente'
+        };
+        
+        const { data: agendamentoData, error: agendamentoError } = await supabaseClient
+            .from('agendamentos')
+            .insert([agendamento])
+            .select()
+            .single();
+        
+        if (agendamentoError) throw agendamentoError;
+        
+        // Adicionar na tabela de inadimplentes
+        const inadimplente = {
+            agendamento_id: agendamentoData.id,
+            cliente_id: clienteId,
+            telefone: telefoneNormalizado,
+            valor_devido: valorDevido,
+            data_vencimento: dataServico,
+            observacoes_cobranca: observacoes || null
+        };
+        
+        const { error: inadimplenteError } = await supabaseClient
+            .from('inadimplentes')
+            .insert([inadimplente]);
+        
+        if (inadimplenteError) throw inadimplenteError;
+        
+        showNotification('Cliente inadimplente adicionado com sucesso!', 'success');
+        closeAddUnpaidModal();
+        loadUnpaidClients(); // Recarregar lista
+        
+    } catch (error) {
+        console.error('Erro ao adicionar inadimplente:', error);
+        showNotification('Erro ao adicionar inadimplente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// ==================== GERENCIAMENTO DE CLIENTES ====================
+
+// Função para carregar clientes
+async function loadClients() {
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        const searchTerm = document.getElementById('clientSearch')?.value?.trim() || '';
+        
+        let query = supabaseClient
+            .from('clientes')
+            .select('*')
+            .order('criado_em', { ascending: false });
+        
+        // Aplicar filtro de busca se houver
+        if (searchTerm) {
+            query = query.or(`nome.ilike.%${searchTerm}%,telefone.ilike.%${searchTerm}%`);
+        }
+        
+        const { data: clients, error } = await query;
+        
+        if (error) throw error;
+        
+        // Buscar estatísticas de agendamentos para cada cliente
+        const clientsWithStats = await Promise.all((clients || []).map(async (client) => {
+            const { data: agendamentos } = await supabaseClient
+                .from('agendamentos')
+                .select('data_horario')
+                .eq('cliente_id', client.id)
+                .order('data_horario', { ascending: false });
+            
+            return {
+                ...client,
+                totalAgendamentos: agendamentos?.length || 0,
+                ultimoAgendamento: agendamentos?.[0]?.data_horario || null
+            };
+        }));
+        
+        renderClientsTable(clientsWithStats);
+        
+    } catch (error) {
+        console.error('Erro ao carregar clientes:', error);
+        showNotification('Erro ao carregar clientes: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para busca em tempo real
+function setupClientSearch() {
+    const searchInput = document.getElementById('clientSearch');
+    if (searchInput) {
+        let searchTimeout;
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                loadClients();
+            }, 500); // Aguarda 500ms após parar de digitar
+        });
+    }
+}
+
+// Função para renderizar tabela de clientes
+function renderClientsTable(clients) {
+    const tableBody = document.querySelector('#clientsTableBody');
+    
+    if (!tableBody) {
+        console.error('Tabela de clientes não encontrada');
+        return;
+    }
+    
+    tableBody.innerHTML = '';
+    
+    if (!clients || clients.length === 0) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="7" style="text-align: center; padding: 20px; color: rgba(255,255,255,0.5);">
+                    Nenhum cliente encontrado
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
+    clients.forEach(client => {
+        const totalAgendamentos = client.totalAgendamentos || 0;
+        const ultimoAgendamentoFormatado = client.ultimoAgendamento ? 
+            formatDate(client.ultimoAgendamento) : 'Nunca';
+        
+        const statusClass = client.status_cliente === 'ativo' ? 'status-active' : 
+                           client.status_cliente === 'inativo' ? 'status-inactive' : 'status-blocked';
+        
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${client.nome}</td>
+            <td>${client.telefone}</td>
+            <td><span class="status-badge ${statusClass}">${client.status_cliente || 'ativo'}</span></td>
+            <td>${totalAgendamentos}</td>
+            <td>${ultimoAgendamentoFormatado}</td>
+            <td>${formatDate(client.criado_em)}</td>
+            <td>
+                <div class="action-buttons">
+                    <button class="btn-edit" onclick="openEditClientModal(${client.id})" title="Editar">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button class="btn-delete" onclick="deleteClient(${client.id}, '${client.nome}')" title="Excluir">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                    <button class="btn-contact" onclick="contactClientDirect('${client.telefone}', '${client.nome}')" title="Contatar">
+                        <i class="fab fa-whatsapp"></i>
+                    </button>
+                </div>
+            </td>
+        `;
+        
+        tableBody.appendChild(row);
+    });
+}
+
+// Função para abrir modal de adicionar cliente
+function openAddClientModal() {
+    const modal = document.getElementById('addClientModal');
+    modal.style.display = 'block';
+    
+    // Limpar formulário
+    document.getElementById('addClientForm').reset();
+    document.getElementById('addClientStatus').value = 'ativo';
+}
+
+// Função para fechar modal de adicionar cliente
+function closeAddClientModal() {
+    const modal = document.getElementById('addClientModal');
+    modal.style.display = 'none';
+    
+    // Limpar formulário
+    document.getElementById('addClientForm').reset();
+}
+
+// Função para adicionar cliente
+async function addClient(event) {
+    event.preventDefault();
+    
+    const nome = document.getElementById('addClientNome').value.trim();
+    const telefone = document.getElementById('addClientTelefone').value.trim();
+    const email = document.getElementById('addClientEmail').value.trim();
+    const dataNascimento = document.getElementById('addClientDataNascimento').value;
+    const status = document.getElementById('addClientStatus').value;
+    const observacoes = document.getElementById('addClientObservacoes').value.trim();
+    
+    // Validações
+    if (!nome || !telefone) {
+        showNotification('Nome e telefone são obrigatórios.', 'warning');
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        const telefoneNormalizado = normalizePhone(telefone);
+        
+        // Verificar se já existe cliente com este telefone
+        const { data: existingClient } = await supabaseClient
+            .from('clientes')
+            .select('id')
+            .eq('telefone', telefoneNormalizado)
+            .single();
+        
+        if (existingClient) {
+            showNotification('Já existe um cliente cadastrado com este telefone.', 'warning');
+            return;
+        }
+        
+        // Criar novo cliente
+        const clienteData = {
+            nome: nome,
+            telefone: telefoneNormalizado,
+            email: email || null,
+            data_nascimento: dataNascimento || null,
+            status_cliente: status,
+            observacoes: observacoes || null
+        };
+        
+        const { error } = await supabaseClient
+            .from('clientes')
+            .insert([clienteData]);
+        
+        if (error) throw error;
+        
+        showNotification('Cliente adicionado com sucesso!', 'success');
+        closeAddClientModal();
+        loadClients(); // Recarregar lista
+        
+    } catch (error) {
+        console.error('Erro ao adicionar cliente:', error);
+        showNotification('Erro ao adicionar cliente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para abrir modal de editar cliente
+async function openEditClientModal(clientId) {
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        const { data: client, error } = await supabaseClient
+            .from('clientes')
+            .select('*')
+            .eq('id', clientId)
+            .single();
+        
+        if (error) throw error;
+        
+        // Preencher formulário
+        document.getElementById('editClientId').value = client.id;
+        document.getElementById('editClientNome').value = client.nome;
+        document.getElementById('editClientTelefone').value = client.telefone;
+        document.getElementById('editClientEmail').value = client.email || '';
+        document.getElementById('editClientDataNascimento').value = client.data_nascimento || '';
+        document.getElementById('editClientStatus').value = client.status_cliente;
+        document.getElementById('editClientObservacoes').value = client.observacoes || '';
+        
+        // Abrir modal
+        const modal = document.getElementById('editClientModal');
+        modal.style.display = 'block';
+        
+    } catch (error) {
+        console.error('Erro ao carregar dados do cliente:', error);
+        showNotification('Erro ao carregar dados do cliente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para fechar modal de editar cliente
+function closeEditClientModal() {
+    const modal = document.getElementById('editClientModal');
+    modal.style.display = 'none';
+    
+    // Limpar formulário
+    document.getElementById('editClientForm').reset();
+}
+
+// Função para atualizar cliente
+async function updateClient(event) {
+    event.preventDefault();
+    
+    const clientId = document.getElementById('editClientId').value;
+    const nome = document.getElementById('editClientNome').value.trim();
+    const telefone = document.getElementById('editClientTelefone').value.trim();
+    const email = document.getElementById('editClientEmail').value.trim();
+    const dataNascimento = document.getElementById('editClientDataNascimento').value;
+    const status = document.getElementById('editClientStatus').value;
+    const observacoes = document.getElementById('editClientObservacoes').value.trim();
+    
+    // Validações
+    if (!nome || !telefone) {
+        showNotification('Nome e telefone são obrigatórios.', 'warning');
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        const telefoneNormalizado = normalizePhone(telefone);
+        
+        // Verificar se já existe outro cliente com este telefone
+        const { data: existingClient } = await supabaseClient
+            .from('clientes')
+            .select('id')
+            .eq('telefone', telefoneNormalizado)
+            .neq('id', clientId)
+            .single();
+        
+        if (existingClient) {
+            showNotification('Já existe outro cliente cadastrado com este telefone.', 'warning');
+            return;
+        }
+        
+        // Atualizar cliente
+        const clienteData = {
+            nome: nome,
+            telefone: telefoneNormalizado,
+            email: email || null,
+            data_nascimento: dataNascimento || null,
+            status_cliente: status,
+            observacoes: observacoes || null
+        };
+        
+        const { error } = await supabaseClient
+            .from('clientes')
+            .update(clienteData)
+            .eq('id', clientId);
+        
+        if (error) throw error;
+        
+        showNotification('Cliente atualizado com sucesso!', 'success');
+        closeEditClientModal();
+        loadClients(); // Recarregar lista
+        
+    } catch (error) {
+        console.error('Erro ao atualizar cliente:', error);
+        showNotification('Erro ao atualizar cliente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para excluir cliente
+async function deleteClient(clientId, clientName) {
+    if (!confirm(`Tem certeza que deseja excluir o cliente "${clientName}"?\n\nEsta ação não pode ser desfeita.`)) {
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        // Verificar se o cliente tem agendamentos
+        const { data: appointments, error: appointmentsError } = await supabaseClient
+            .from('agendamentos')
+            .select('id')
+            .eq('cliente_id', clientId)
+            .limit(1);
+        
+        if (appointmentsError) throw appointmentsError;
+        
+        if (appointments && appointments.length > 0) {
+            showNotification('Não é possível excluir este cliente pois ele possui agendamentos.', 'warning');
+            return;
+        }
+        
+        // Excluir cliente
+        const { error } = await supabaseClient
+            .from('clientes')
+            .delete()
+            .eq('id', clientId);
+        
+        if (error) throw error;
+        
+        showNotification('Cliente excluído com sucesso!', 'success');
+        loadClients(); // Recarregar lista
+        
+    } catch (error) {
+        console.error('Erro ao excluir cliente:', error);
+        showNotification('Erro ao excluir cliente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para contatar cliente diretamente
+function contactClientDirect(phone, name) {
+    const normalizedPhone = normalizePhone(phone);
+    const message = `Olá ${name}! Como está? Aqui é da Barbearia do Jão. Esperamos vê-lo em breve!`;
+    const whatsappUrl = `https://wa.me/55${normalizedPhone}?text=${encodeURIComponent(message)}`;
+    
+    window.open(whatsappUrl, '_blank');
+}
+
+// Tornar funções disponíveis globalmente
+window.loadUnpaidClients = loadUnpaidClients;
+window.markAsPaid = markAsPaid;
+window.contactClient = contactClient;
+window.openAddUnpaidModal = openAddUnpaidModal;
+window.closeAddUnpaidModal = closeAddUnpaidModal;
+window.updateUnpaidServicePrice = updateUnpaidServicePrice;
+window.addUnpaidClient = addUnpaidClient;
+
+// Funções de gerenciamento de clientes
+window.loadClients = loadClients;
+window.openAddClientModal = openAddClientModal;
+window.closeAddClientModal = closeAddClientModal;
+window.addClient = addClient;
+window.openEditClientModal = openEditClientModal;
+window.closeEditClientModal = closeEditClientModal;
+window.updateClient = updateClient;
+window.deleteClient = deleteClient;
+window.contactClientDirect = contactClientDirect;

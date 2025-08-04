@@ -306,7 +306,7 @@ body {
 }
 
 /* Melhorias nos filtros */
-.filter-select, .filter-date {
+.filter-select, .filter-date, .filter-input {
     background: rgba(44, 44, 44, 0.8);
     border: 1px solid rgba(220, 38, 38, 0.3);
     color: white;
@@ -315,10 +315,18 @@ body {
     font-size: 0.9rem;
 }
 
-.filter-select:focus, .filter-date:focus {
+.filter-select:focus, .filter-date:focus, .filter-input:focus {
     outline: none;
     border-color: #dc2626;
     box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.2);
+}
+
+.filter-input {
+    min-width: 250px;
+}
+
+.filter-input::placeholder {
+    color: rgba(255, 255, 255, 0.5);
 }
 
 .refresh-btn {
@@ -862,6 +870,42 @@ body {
     margin-top: 4px;
 }
 
+/* Slot principal do agendamento - mostra informações completas */
+.time-slot.occupied.main-slot {
+    background: linear-gradient(135deg, rgba(244, 67, 54, 0.3) 0%, rgba(244, 67, 54, 0.2) 100%);
+    border: 2px solid rgba(244, 67, 54, 0.5);
+    position: relative;
+}
+
+.time-slot.occupied.main-slot::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #f44336, #d32f2f, #f44336);
+    border-radius: 10px 10px 0 0;
+}
+
+/* Slots secundários do agendamento - visual mais sutil */
+.time-slot.occupied.secondary-slot {
+    background: linear-gradient(135deg, rgba(244, 67, 54, 0.15) 0%, rgba(244, 67, 54, 0.08) 100%);
+    border: 1px dashed rgba(244, 67, 54, 0.4);
+    opacity: 0.8;
+}
+
+.time-slot.occupied.secondary-slot .slot-time {
+    font-size: 0.85rem;
+    opacity: 0.7;
+}
+
+.time-slot.occupied.secondary-slot .slot-client {
+    font-size: 0.75rem;
+    opacity: 0.6;
+    font-style: italic;
+}
+
 .time-slot.closed {
     background: linear-gradient(135deg, rgba(158, 158, 158, 0.2) 0%, rgba(158, 158, 158, 0.1) 100%);
     color: #9E9E9E;
@@ -1067,19 +1111,73 @@ body {
 }
 
 .chart-container {
-    height: 300px;
+    min-height: 200px;
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    gap: 10px;
     background: rgba(0, 0, 0, 0.3);
     border-radius: 10px;
-    color: rgba(255, 255, 255, 0.5);
+    padding: 15px;
+}
+
+.chart-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.chart-item:last-child {
+    border-bottom: none;
+}
+
+.chart-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+}
+
+.chart-value {
+    color: #4FC3F7;
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.chart-value.success {
+    color: #4CAF50;
+}
+
+.chart-value.warning {
+    color: #FF9800;
 }
 
 .stats-summary {
     display: flex;
     flex-direction: column;
     gap: 15px;
+}
+
+.stat-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.stat-item:last-child {
+    border-bottom: none;
+}
+
+.stat-label {
+    color: rgba(255, 255, 255, 0.7);
+    font-size: 0.9rem;
+}
+
+.stat-value {
+    color: #4FC3F7;
+    font-weight: 600;
+    font-size: 1.1rem;
 }
 
 .summary-item {
@@ -1115,6 +1213,409 @@ body {
 
 .modal-content::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+}
+
+/* ==================== ESTILOS PARA GERENCIAMENTO DE CLIENTES ==================== */
+
+/* Cabeçalho da seção de clientes */
+.clients-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.clients-title {
+    color: #dc2626;
+    font-size: 1.8rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.clients-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.client-search {
+    padding: 10px 15px;
+    background: rgba(44, 44, 44, 0.8);
+    border: 2px solid rgba(220, 38, 38, 0.3);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 1rem;
+    min-width: 250px;
+    transition: all 0.3s ease;
+}
+
+.client-search:focus {
+    outline: none;
+    border-color: #dc2626;
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+}
+
+.client-search::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.add-client-btn {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.add-client-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(220, 38, 38, 0.4);
+}
+
+.refresh-clients-btn {
+    background: rgba(79, 195, 247, 0.2);
+    color: #4FC3F7;
+    border: 2px solid rgba(79, 195, 247, 0.3);
+    padding: 10px 15px;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.refresh-clients-btn:hover {
+    background: rgba(79, 195, 247, 0.3);
+    border-color: #4FC3F7;
+    transform: translateY(-2px);
+}
+
+/* Tabela de clientes */
+.clients-table-container {
+    background: rgba(44, 44, 44, 0.8);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.clients-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95rem;
+}
+
+.clients-table th {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    color: white;
+    padding: 15px 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.2);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.clients-table td {
+    padding: 12px;
+    border-bottom: 1px solid rgba(220, 38, 38, 0.1);
+    color: #ffffff;
+    vertical-align: middle;
+}
+
+.clients-table tbody tr {
+    transition: all 0.3s ease;
+}
+
+.clients-table tbody tr:hover {
+    background: rgba(220, 38, 38, 0.1);
+    transform: scale(1.01);
+}
+
+/* Status badges */
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-active {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+}
+
+.status-inactive {
+    background: rgba(255, 193, 7, 0.2);
+    color: #FFC107;
+    border: 1px solid rgba(255, 193, 7, 0.3);
+}
+
+.status-blocked {
+    background: rgba(244, 67, 54, 0.2);
+    color: #F44336;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+}
+
+/* Botões de ação */
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-edit {
+    background: rgba(79, 195, 247, 0.2);
+    color: #4FC3F7;
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+}
+
+.btn-edit:hover {
+    background: rgba(79, 195, 247, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn-delete {
+    background: rgba(244, 67, 54, 0.2);
+    color: #F44336;
+    border: 1px solid rgba(244, 67, 54, 0.3);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+}
+
+.btn-delete:hover {
+    background: rgba(244, 67, 54, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn-contact {
+    background: rgba(76, 175, 80, 0.2);
+    color: #4CAF50;
+    border: 1px solid rgba(76, 175, 80, 0.3);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+}
+
+.btn-contact:hover {
+    background: rgba(76, 175, 80, 0.3);
+    transform: translateY(-1px);
+}
+
+/* Busca de clientes */
+.search-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+}
+
+.search-input {
+    background: rgba(44, 44, 44, 0.8);
+    border: 1px solid rgba(220, 38, 38, 0.3);
+    color: #ffffff;
+    padding: 10px 40px 10px 15px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    min-width: 250px;
+    transition: all 0.3s ease;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: #dc2626;
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+}
+
+.search-icon {
+    position: absolute;
+    right: 80px;
+    color: rgba(255, 255, 255, 0.5);
+    pointer-events: none;
+}
+
+.refresh-btn {
+    background: rgba(79, 195, 247, 0.2);
+    color: #4FC3F7;
+    border: 1px solid rgba(79, 195, 247, 0.3);
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.refresh-btn:hover {
+    background: rgba(79, 195, 247, 0.3);
+    transform: translateY(-2px);
+}
+
+/* Responsividade para tabela de clientes */
+@media (max-width: 1200px) {
+    .clients-table {
+        font-size: 0.85rem;
+    }
+    
+    .clients-table th,
+    .clients-table td {
+        padding: 10px 8px;
+    }
+    
+    .action-buttons {
+        flex-direction: column;
+        gap: 4px;
+    }
+    
+    .btn-edit,
+    .btn-delete,
+    .btn-contact {
+        padding: 4px 8px;
+        font-size: 0.8rem;
+    }
+}
+
+@media (max-width: 768px) {
+    .clients-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .clients-controls {
+        justify-content: center;
+    }
+    
+    .client-search {
+        min-width: 200px;
+    }
+    
+    .clients-table-container {
+        overflow-x: auto;
+    }
+    
+    .clients-table {
+        min-width: 800px;
+    }
+}
+
+/* Melhorias nos modais de cliente */
+.modal-content {
+    max-width: 600px;
+}
+
+.form-group {
+    margin-bottom: 20px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #4FC3F7;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    width: 100%;
+    padding: 12px 15px;
+    background: rgba(44, 44, 44, 0.8);
+    border: 2px solid rgba(220, 38, 38, 0.3);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 1rem;
+    transition: all 0.3s ease;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: #dc2626;
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.3);
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+/* Botões do modal */
+.modal-footer {
+    display: flex;
+    gap: 15px;
+    justify-content: flex-end;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid rgba(220, 38, 38, 0.2);
+}
+
+.btn-cancel {
+    background: rgba(108, 117, 125, 0.2);
+    color: #6c757d;
+    border: 2px solid rgba(108, 117, 125, 0.3);
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-cancel:hover {
+    background: rgba(108, 117, 125, 0.3);
+    transform: translateY(-1px);
+}
+
+.btn-save {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-save:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(220, 38, 38, 0.4);
 }
 
 /* Modal de Adicionar Agendamento */
@@ -1442,6 +1943,148 @@ body {
     pointer-events: none;
 }
 
+/* Seção Inadimplentes */
+.unpaid-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.summary-card {
+    background: rgba(44, 44, 44, 0.8);
+    padding: 1.5rem;
+    border-radius: 15px;
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    transition: all 0.3s ease;
+}
+
+.summary-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 8px 20px rgba(220, 38, 38, 0.2);
+    border-color: #dc2626;
+}
+
+.summary-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    color: white;
+    flex-shrink: 0;
+}
+
+.summary-info h4 {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+.summary-number {
+    color: #dc2626;
+    font-size: 1.8rem;
+    font-weight: 700;
+    display: block;
+}
+
+.summary-text {
+    color: #4FC3F7;
+    font-size: 1rem;
+    font-weight: 600;
+    display: block;
+}
+
+.unpaid-table-container {
+    background: rgba(44, 44, 44, 0.8);
+    border-radius: 15px;
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    overflow: hidden;
+}
+
+.unpaid-table-container .appointments-table {
+    margin: 0;
+    border-radius: 0;
+    border: none;
+}
+
+.unpaid-table-container .appointments-table th {
+    background: rgba(220, 38, 38, 0.1);
+    color: #dc2626;
+    font-weight: 600;
+}
+
+.unpaid-table-container .appointments-table tbody tr:hover {
+    background: rgba(220, 38, 38, 0.1);
+}
+
+.unpaid-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.mark-paid-btn {
+    background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.mark-paid-btn:hover {
+    background: linear-gradient(135deg, #45a049 0%, #3d8b40 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+}
+
+.contact-btn {
+    background: linear-gradient(135deg, #4FC3F7 0%, #29B6F6 100%);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.contact-btn:hover {
+    background: linear-gradient(135deg, #29B6F6 0%, #0288D1 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(79, 195, 247, 0.3);
+}
+
+.overdue-days {
+    color: #ff6b6b;
+    font-weight: 600;
+}
+
+.overdue-days.critical {
+    color: #ff4757;
+    background: rgba(255, 71, 87, 0.1);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
 /* Responsividade */
 @media (max-width: 768px) {
     .dashboard {
@@ -1472,10 +2115,110 @@ body {
     
     .appointments-table-container {
         overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    
+    .appointments-table {
+        min-width: 800px; /* Garante que a tabela tenha largura mínima */
+    }
+    
+    .appointments-table th,
+    .appointments-table td {
+        padding: 10px 8px;
+        font-size: 0.9rem;
+        white-space: nowrap;
+    }
+    
+    /* Ajustar larguras das colunas para mobile */
+    .appointments-table th:nth-child(1), /* Cliente */
+    .appointments-table td:nth-child(1) {
+        min-width: 150px;
+    }
+    
+    .appointments-table th:nth-child(2), /* Telefone */
+    .appointments-table td:nth-child(2) {
+        min-width: 120px;
+    }
+    
+    .appointments-table th:nth-child(3), /* Serviço */
+    .appointments-table td:nth-child(3) {
+        min-width: 100px;
+    }
+    
+    .appointments-table th:nth-child(4), /* Data */
+    .appointments-table td:nth-child(4) {
+        min-width: 90px;
+    }
+    
+    .appointments-table th:nth-child(5), /* Horário */
+    .appointments-table td:nth-child(5) {
+        min-width: 80px;
+    }
+    
+    .appointments-table th:nth-child(6), /* Preço */
+    .appointments-table td:nth-child(6) {
+        min-width: 80px;
+    }
+    
+    .appointments-table th:nth-child(7), /* Status */
+    .appointments-table td:nth-child(7) {
+        min-width: 100px;
+    }
+    
+    .appointments-table th:nth-child(8), /* Ações */
+    .appointments-table td:nth-child(8) {
+        min-width: 120px;
+        position: sticky;
+        right: 0;
+        background: rgba(44, 44, 44, 0.95);
+        border-left: 1px solid rgba(220, 38, 38, 0.2);
+    }
+    
+    /* Botões de ação menores no mobile */
+    .action-btn {
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        margin: 0 1px;
+    }
+    
+    .btn-edit, .btn-delete {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+        margin-right: 3px;
     }
     
     .time-slots {
-        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 8px;
+    }
+    
+    .time-slot {
+        padding: 10px 8px;
+        font-size: 0.85rem;
+    }
+    
+    .slot-time {
+        font-size: 0.9rem;
+        margin-bottom: 2px;
+    }
+    
+    .slot-client {
+        font-size: 0.75rem;
+        line-height: 1.2;
+    }
+    
+    /* Melhor visualização dos slots ocupados no mobile */
+    .time-slot.occupied.main-slot .slot-time {
+        font-size: 0.8rem;
+        line-height: 1.1;
+    }
+    
+    .time-slot.occupied.secondary-slot {
+        opacity: 0.9;
+    }
+    
+    .time-slot.occupied.secondary-slot .slot-time {
+        font-size: 0.8rem;
     }
     
     .clients-grid {
@@ -1484,6 +2227,180 @@ body {
     
     .reports-grid {
         grid-template-columns: 1fr;
+    }
+    
+    .unpaid-summary {
+        grid-template-columns: 1fr;
+    }
+    
+    .unpaid-actions {
+        flex-direction: column;
+    }
+    
+    .mark-paid-btn,
+    .contact-btn {
+        font-size: 0.7rem;
+        padding: 4px 8px;
+    }
+    
+    /* Header mobile */
+    .header {
+        padding: 0 15px;
+    }
+    
+    .header h2 {
+        font-size: 1.3rem;
+    }
+    
+    /* Controles de data mobile */
+    .date-selector, .schedule-controls {
+        gap: 8px;
+    }
+    
+    .date-input, .day-select {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+    }
+    
+    .today-btn, .tomorrow-btn, .refresh-btn {
+        padding: 8px 12px;
+        font-size: 0.85rem;
+    }
+    
+    /* Estatísticas mobile */
+    .summary-stats {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+    }
+    
+    .stat-item {
+        padding: 0.8rem;
+    }
+    
+    .stat-number {
+        font-size: 1.5rem;
+    }
+    
+    .stat-label {
+        font-size: 0.8rem;
+    }
+    
+    /* Modal responsivo */
+    .modal-content {
+        width: 95%;
+        max-width: 500px;
+        margin: 10px;
+    }
+    
+    .form-row {
+        flex-direction: column;
+    }
+    
+    .form-row .form-group {
+        width: 100%;
+    }
+}
+
+/* Responsividade para smartphones pequenos */
+@media (max-width: 480px) {
+    .time-slots {
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        gap: 6px;
+    }
+    
+    .time-slot {
+        padding: 8px 6px;
+        font-size: 0.8rem;
+    }
+    
+    .slot-time {
+        font-size: 0.85rem;
+        margin-bottom: 1px;
+    }
+    
+    .slot-client {
+        font-size: 0.7rem;
+        line-height: 1.1;
+    }
+    
+    .time-slot.occupied.main-slot .slot-time {
+        font-size: 0.75rem;
+        line-height: 1;
+    }
+    
+    .time-slot.occupied.secondary-slot .slot-time {
+        font-size: 0.75rem;
+    }
+    
+    /* Header ainda menor */
+    .header h2 {
+        font-size: 1.1rem;
+    }
+    
+    /* Controles compactos */
+    .date-input, .day-select {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+    }
+    
+    .today-btn, .tomorrow-btn, .refresh-btn {
+        padding: 6px 10px;
+        font-size: 0.8rem;
+    }
+    
+    /* Estatísticas compactas */
+    .summary-stats {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    
+    .stat-item {
+        padding: 0.6rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .stat-number {
+        font-size: 1.3rem;
+    }
+    
+    .stat-label {
+        font-size: 0.75rem;
+    }
+    
+    /* Modal ainda mais compacto */
+    .modal-content {
+        width: 98%;
+        margin: 5px;
+        padding: 15px;
+    }
+    
+    .modal-header h3 {
+        font-size: 1.2rem;
+    }
+    
+    .form-group label {
+        font-size: 0.85rem;
+    }
+    
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+        padding: 8px 10px;
+        font-size: 0.85rem;
+    }
+    
+    /* Tabela ainda mais compacta */
+    .appointments-table th,
+    .appointments-table td {
+        padding: 8px 6px;
+        font-size: 0.8rem;
+    }
+    
+    .action-btn {
+        padding: 3px 6px;
+        font-size: 0.7rem;
     }
 }
 

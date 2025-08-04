@@ -81,8 +81,12 @@
                     Clientes
                 </a>
                 <a href="#" class="nav-item" data-section="reports">
-                    <i class="fas fa-chart-bar"></i>
-                    Relatórios
+                <i class="fas fa-chart-bar"></i>
+                Estatísticas
+            </a>
+                <a href="#" class="nav-item" data-section="unpaid">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    Inadimplentes
                 </a>
             </nav>
         </aside>
@@ -223,26 +227,48 @@
             <!-- Seção Clientes -->
             <section id="clients" class="content-section">
                 <div class="section-header">
-                    <h3><i class="fas fa-users"></i> Clientes</h3>
-                    <div class="search-container">
-                        <input type="text" id="clientSearch" placeholder="Buscar cliente..." class="search-input">
-                        <i class="fas fa-search search-icon"></i>
+                    <h3><i class="fas fa-users"></i> Gerenciar Clientes</h3>
+                    <div class="section-actions">
+                        <button id="addClientBtn" class="add-btn" onclick="openAddClientModal()">
+                            <i class="fas fa-plus"></i> Novo Cliente
+                        </button>
+                        <div class="search-container">
+                            <input type="text" id="clientSearch" placeholder="Buscar cliente..." class="search-input" onkeyup="if(event.key==='Enter') loadClients()">
+                            <i class="fas fa-search search-icon"></i>
+                            <button id="refreshClients" class="refresh-btn" onclick="loadClients()">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
-                <div class="clients-grid" id="clientsGrid">
-                    <!-- Será preenchido dinamicamente -->
+                <div class="clients-table-container">
+                    <table id="clientsTable" class="appointments-table">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Telefone</th>
+                                <th>Status</th>
+                                <th>Total de Agendamentos</th>
+                                <th>Último Atendimento</th>
+                                <th>Cadastrado em</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="clientsTableBody">
+                            <!-- Será preenchido dinamicamente -->
+                        </tbody>
+                    </table>
                 </div>
             </section>
 
-            <!-- Seção Relatórios -->
-            <section id="reports" class="content-section">
-                <div class="section-header">
-                    <h3><i class="fas fa-chart-bar"></i> Relatórios</h3>
+            <!-- Seção Estatísticas -->
+        <section id="reports" class="content-section">
+            <div class="section-header">
+                <h3><i class="fas fa-chart-bar"></i> Estatísticas</h3>
                     <div class="report-filters">
                         <input type="date" id="reportStartDate" class="date-input">
                         <input type="date" id="reportEndDate" class="date-input">
-                        <button id="generateReport" class="generate-btn">Gerar Relatório</button>
                     </div>
                 </div>
 
@@ -267,6 +293,74 @@
                             <!-- Estatísticas serão inseridas aqui -->
                         </div>
                     </div>
+                </div>
+            </section>
+
+            <!-- Seção Inadimplentes -->
+            <section id="unpaid" class="content-section">
+                <div class="section-header">
+                    <h3><i class="fas fa-exclamation-triangle"></i> Clientes Inadimplentes</h3>
+                    <div class="section-actions">
+                        <button id="addUnpaidBtn" class="add-btn" onclick="openAddUnpaidModal()">
+                            <i class="fas fa-plus"></i>
+                            Adicionar Inadimplente
+                        </button>
+                        <div class="filters">
+                            <input type="text" id="unpaidClientFilter" class="filter-input" placeholder="Buscar por cliente ou telefone..." onkeyup="if(event.key==='Enter') loadUnpaidClients()">
+                            <button id="refreshUnpaid" class="refresh-btn" onclick="loadUnpaidClients()">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="unpaid-summary">
+                    <div class="summary-card">
+                        <div class="summary-icon">
+                            <i class="fas fa-users"></i>
+                        </div>
+                        <div class="summary-info">
+                            <h4>Total de Inadimplentes</h4>
+                            <span id="totalUnpaidClients" class="summary-number">0</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-icon">
+                            <i class="fas fa-dollar-sign"></i>
+                        </div>
+                        <div class="summary-info">
+                            <h4>Valor Total em Aberto</h4>
+                            <span id="totalUnpaidAmount" class="summary-number">R$ 0,00</span>
+                        </div>
+                    </div>
+                    <div class="summary-card">
+                        <div class="summary-icon">
+                            <i class="fas fa-calendar-alt"></i>
+                        </div>
+                        <div class="summary-info">
+                            <h4>Status</h4>
+                            <span class="summary-text">Atualizado</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="unpaid-table-container">
+                    <table id="unpaidTable" class="appointments-table">
+                        <thead>
+                            <tr>
+                                <th>Cliente</th>
+                                <th>Telefone</th>
+                                <th>Serviço</th>
+                                <th>Data do Serviço</th>
+                                <th>Valor</th>
+                                <th>Dias em Atraso</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="unpaidTableBody">
+                            <!-- Será preenchido dinamicamente -->
+                        </tbody>
+                    </table>
                 </div>
             </section>
         </main>
@@ -310,36 +404,19 @@
                         </select>
                     </div>
                     
+                    <div class="form-group">
+                        <label for="addData">Data:</label>
+                        <input type="date" id="addData" required>
+                    </div>
+                    
                     <div class="form-row">
                         <div class="form-group">
-                            <label for="addData">Data:</label>
-                            <input type="date" id="addData" required>
+                            <label for="addHorarioInicio">Horário de Início:</label>
+                            <input type="time" id="addHorarioInicio" required>
                         </div>
                         <div class="form-group">
-                            <label for="addHorario">Horário:</label>
-                            <select id="addHorario" required>
-                                <option value="">Selecione um horário</option>
-                                <option value="09:00">09:00</option>
-                                <option value="09:30">09:30</option>
-                                <option value="10:00">10:00</option>
-                                <option value="10:30">10:30</option>
-                                <option value="11:00">11:00</option>
-                                <option value="11:30">11:30</option>
-                                <option value="12:00">12:00</option>
-                                <option value="12:30">12:30</option>
-                                <option value="13:00">13:00</option>
-                                <option value="13:30">13:30</option>
-                                <option value="14:00">14:00</option>
-                                <option value="14:30">14:30</option>
-                                <option value="15:00">15:00</option>
-                                <option value="15:30">15:30</option>
-                                <option value="16:00">16:00</option>
-                                <option value="16:30">16:30</option>
-                                <option value="17:00">17:00</option>
-                                <option value="17:30">17:30</option>
-                                <option value="18:00">18:00</option>
-                                <option value="18:30">18:30</option>
-                            </select>
+                            <label for="addHorarioFim">Horário de Fim:</label>
+                            <input type="time" id="addHorarioFim" required>
                         </div>
                     </div>
                     
@@ -356,6 +433,27 @@
                             <option value="concluido">Concluído</option>
                             <option value="cancelado">Cancelado</option>
                         </select>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Forma de Pagamento:</label>
+                            <select id="addFormaPagamento">
+                                <option value="">Não informado</option>
+                                <option value="pix">PIX</option>
+                                <option value="debito">Débito</option>
+                                <option value="credito">Crédito</option>
+                                <option value="dinheiro">Dinheiro</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Pagamento:</label>
+                            <select id="addPagamento">
+                                <option value="">Não informado</option>
+                                <option value="pago">Pago</option>
+                                <option value="pendente">Pendente</option>
+                            </select>
+                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -416,9 +514,15 @@
                         <input type="date" id="editData" required>
                     </div>
                     
-                    <div class="form-group">
-                        <label>Horário:</label>
-                        <input type="time" id="editHorario" required>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Horário de Início:</label>
+                            <input type="time" id="editHorarioInicio" required>
+                        </div>
+                        <div class="form-group">
+                            <label>Horário de Fim:</label>
+                            <input type="time" id="editHorarioFim" required>
+                        </div>
                     </div>
                     
                     <div class="form-group">
@@ -435,6 +539,27 @@
                             <option value="cancelado">Cancelado</option>
                         </select>
                     </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Forma de Pagamento:</label>
+                            <select id="editFormaPagamento">
+                                <option value="">Não informado</option>
+                                <option value="pix">PIX</option>
+                                <option value="debito">Débito</option>
+                                <option value="credito">Crédito</option>
+                                <option value="dinheiro">Dinheiro</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Pagamento:</label>
+                            <select id="editPagamento">
+                                <option value="">Não informado</option>
+                                <option value="pago">Pago</option>
+                                <option value="pendente">Pendente</option>
+                            </select>
+                        </div>
+                    </div>
                     
                     <div class="form-group">
                         <label>Observações:</label>
@@ -445,6 +570,171 @@
             <div class="modal-footer">
                 <button type="button" class="btn-cancel" onclick="closeModal()">Cancelar</button>
                 <button type="button" class="btn-save" onclick="saveAppointment()">Salvar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Adicionar Inadimplente -->
+    <div id="addUnpaidModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4>Adicionar Cliente Inadimplente</h4>
+                <span class="close" onclick="closeAddUnpaidModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="addUnpaidForm" onsubmit="addUnpaidClient(event)">
+                    <div class="form-group">
+                        <label>Cliente:</label>
+                        <div class="client-search-container">
+                            <input type="text" id="addUnpaidNome" placeholder="Digite o nome do cliente..." required autocomplete="off">
+                            <div id="addUnpaidClientSuggestions" class="client-suggestions" style="display: none;"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Telefone:</label>
+                        <input type="tel" id="addUnpaidTelefone" placeholder="(11) 99999-9999" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addUnpaidServico">Serviço:</label>
+                        <select id="addUnpaidServico" required onchange="updateUnpaidServicePrice()">
+                            <option value="">Selecione um serviço</option>
+                            <option value="Corte" data-price="30.00">Corte - R$ 30,00</option>
+                            <option value="Corte Máquina" data-price="25.00">Corte Máquina - R$ 25,00</option>
+                            <option value="Barba" data-price="20.00">Barba - R$ 20,00</option>
+                            <option value="Pezinho" data-price="15.00">Pezinho - R$ 15,00</option>
+                            <option value="Sobrancelha" data-price="20.00">Sobrancelha - R$ 20,00</option>
+                            <option value="Relaxamento" data-price="20.00">Relaxamento - R$ 20,00</option>
+                            <option value="Tintura" data-price="20.00">Tintura - R$ 20,00</option>
+                            <option value="Luzes" data-price="50.00">Luzes - R$ 50,00</option>
+                            <option value="Platinado" data-price="90.00">Platinado - R$ 90,00</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="addUnpaidData">Data do Serviço:</label>
+                        <input type="date" id="addUnpaidData" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Valor Devido:</label>
+                        <input type="number" id="addUnpaidValor" step="0.01" min="0" placeholder="0.00" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Observações:</label>
+                        <textarea id="addUnpaidObservacoes" rows="3" placeholder="Motivo da inadimplência, detalhes do serviço, etc..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeAddUnpaidModal()">Cancelar</button>
+                <button type="submit" form="addUnpaidForm" class="btn-save">Adicionar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Adicionar Cliente -->
+    <div id="addClientModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4>Adicionar Novo Cliente</h4>
+                <span class="close" onclick="closeAddClientModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="addClientForm" onsubmit="addClient(event)">
+                    <div class="form-group">
+                        <label>Nome Completo:</label>
+                        <input type="text" id="addClientNome" placeholder="Digite o nome completo..." required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Telefone:</label>
+                        <input type="tel" id="addClientTelefone" placeholder="(11) 99999-9999" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Email (opcional):</label>
+                        <input type="email" id="addClientEmail" placeholder="cliente@email.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Data de Nascimento (opcional):</label>
+                        <input type="date" id="addClientDataNascimento">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Status:</label>
+                        <select id="addClientStatus" required>
+                            <option value="ativo">Ativo</option>
+                            <option value="inativo">Inativo</option>
+                            <option value="bloqueado">Bloqueado</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Observações:</label>
+                        <textarea id="addClientObservacoes" rows="3" placeholder="Preferências, observações especiais..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeAddClientModal()">Cancelar</button>
+                <button type="submit" form="addClientForm" class="btn-save">Adicionar Cliente</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para Editar Cliente -->
+    <div id="editClientModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4>Editar Cliente</h4>
+                <span class="close" onclick="closeEditClientModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="editClientForm" onsubmit="updateClient(event)">
+                    <input type="hidden" id="editClientId">
+                    
+                    <div class="form-group">
+                        <label>Nome Completo:</label>
+                        <input type="text" id="editClientNome" placeholder="Digite o nome completo..." required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Telefone:</label>
+                        <input type="tel" id="editClientTelefone" placeholder="(11) 99999-9999" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Email (opcional):</label>
+                        <input type="email" id="editClientEmail" placeholder="cliente@email.com">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Data de Nascimento (opcional):</label>
+                        <input type="date" id="editClientDataNascimento">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Status:</label>
+                        <select id="editClientStatus" required>
+                            <option value="ativo">Ativo</option>
+                            <option value="inativo">Inativo</option>
+                            <option value="bloqueado">Bloqueado</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Observações:</label>
+                        <textarea id="editClientObservacoes" rows="3" placeholder="Preferências, observações especiais..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeEditClientModal()">Cancelar</button>
+                <button type="submit" form="editClientForm" class="btn-save">Salvar Alterações</button>
             </div>
         </div>
     </div>
