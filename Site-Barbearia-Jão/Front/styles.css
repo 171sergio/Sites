@@ -20,6 +20,8 @@ body {
     justify-content: center;
     background: linear-gradient(135deg, #000000 0%, #2C2C2C 50%, #000000 100%);
     position: relative;
+    padding: 20px;
+    box-sizing: border-box;
 }
 
 .login-screen::before {
@@ -44,6 +46,8 @@ body {
     width: 100%;
     position: relative;
     z-index: 1;
+    margin: 0 auto;
+    text-align: center;
 }
 
 .logo-container {
@@ -1213,6 +1217,245 @@ body {
 
 .modal-content::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+}
+
+/* ==================== RESPONSIVIDADE PARA TELA DE LOGIN ==================== */
+
+/* Tablets */
+@media (max-width: 768px) {
+    .login-screen {
+        padding: 15px;
+    }
+    
+    .login-container {
+        padding: 2rem;
+        max-width: 350px;
+    }
+    
+    .logo {
+        width: 70px;
+        height: 70px;
+    }
+    
+    .logo-container h1 {
+        font-size: 1.6rem;
+    }
+    
+    .input-group input {
+        padding: 12px 12px 12px 40px;
+        font-size: 0.95rem;
+    }
+    
+    .login-btn {
+        padding: 12px;
+        font-size: 1rem;
+    }
+}
+
+/* Smartphones */
+@media (max-width: 480px) {
+    .login-screen {
+        padding: 10px;
+        min-height: 100vh;
+        align-items: stretch;
+    }
+    
+    .login-container {
+        padding: 1.5rem;
+        max-width: 100%;
+        margin: auto 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: calc(100vh - 20px);
+    }
+    
+    .logo {
+        width: 60px;
+        height: 60px;
+    }
+    
+    .logo-container h1 {
+        font-size: 1.4rem;
+    }
+    
+    .logo-container p {
+        font-size: 0.8rem;
+    }
+    
+    .input-group input {
+        padding: 10px 10px 10px 35px;
+        font-size: 0.9rem;
+    }
+    
+    .input-group i {
+        left: 12px;
+        font-size: 0.9rem;
+    }
+    
+    .login-btn {
+        padding: 10px;
+        font-size: 0.95rem;
+    }
+    
+    .error-message {
+        font-size: 0.8rem;
+        padding: 8px;
+    }
+}
+
+/* Smartphones muito pequenos */
+@media (max-width: 320px) {
+    .login-container {
+        padding: 1rem;
+    }
+    
+    .logo {
+        width: 50px;
+        height: 50px;
+    }
+    
+    .logo-container h1 {
+        font-size: 1.2rem;
+    }
+    
+    .input-group input {
+        padding: 8px 8px 8px 30px;
+        font-size: 0.85rem;
+    }
+    
+    .login-btn {
+        padding: 8px;
+        font-size: 0.9rem;
+    }
+}
+
+/* Schedule Grid Styles */
+.schedule-container {
+    margin-top: 20px;
+}
+
+.schedule-grid {
+    background: rgba(44, 44, 44, 0.8);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+.schedule-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(220, 38, 38, 0.3);
+}
+
+.schedule-header h4 {
+    color: #ffffff;
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.schedule-legend {
+    display: flex;
+    gap: 15px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #ffffff;
+    font-size: 0.9rem;
+}
+
+.legend-color {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+}
+
+.legend-color.available {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.legend-color.occupied {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+.time-slots {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+    gap: 10px;
+}
+
+.time-slot {
+    padding: 12px 8px;
+    text-align: center;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.time-slot.available {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: #ffffff;
+}
+
+.time-slot.available:hover {
+    background: linear-gradient(135deg, #059669 0%, #047857 100%);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.time-slot.occupied {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    color: #ffffff;
+    cursor: not-allowed;
+}
+
+.time-slot.occupied:hover {
+    background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
+}
+
+/* Responsive adjustments for schedule grid */
+@media (max-width: 768px) {
+    .schedule-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+    }
+    
+    .schedule-legend {
+        gap: 10px;
+    }
+    
+    .time-slots {
+        grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+        gap: 8px;
+    }
+    
+    .time-slot {
+        padding: 10px 6px;
+        font-size: 0.8rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .time-slots {
+        grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+        gap: 6px;
+    }
+    
+    .time-slot {
+        padding: 8px 4px;
+        font-size: 0.75rem;
+    }
 }
 
 /* ==================== ESTILOS PARA GERENCIAMENTO DE CLIENTES ==================== */
