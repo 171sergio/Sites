@@ -36,6 +36,8 @@ let currentUser = null;
 let currentSection = 'overview';
 let clients = [];
 let services = [];
+let appointments = [];
+let todayAppointments = [];
 
 // Cache para dados do banco
 const dataCache = new Map();
@@ -80,6 +82,7 @@ async function findOrCreateClient(telefone, nome) {
     }
 
     const normalizedPhone = normalizePhone(telefone);
+    console.log('🔍 Buscando cliente:', { telefone, nome, normalizedPhone });
     
     try {
         // Primeiro, tentar encontrar cliente existente
@@ -89,13 +92,20 @@ async function findOrCreateClient(telefone, nome) {
             .eq('telefone', normalizedPhone)
             .single();
 
+        if (searchError && searchError.code !== 'PGRST116') {
+            console.error('❌ Erro na busca do cliente:', searchError);
+            throw searchError;
+        }
+
         if (existingClient) {
+            console.log('✅ Cliente existente encontrado:', existingClient);
             // Cliente encontrado, atualizar cache
             clientsCache.set(existingClient.id, existingClient);
             return existingClient;
         }
 
         // Cliente não encontrado, criar novo
+        console.log('🆕 Criando novo cliente...');
         const { data: newClient, error: createError } = await supabaseClient
             .from('clientes')
             .insert([{
@@ -106,14 +116,18 @@ async function findOrCreateClient(telefone, nome) {
             .select()
             .single();
 
-        if (createError) throw createError;
+        if (createError) {
+            console.error('❌ Erro ao criar cliente:', createError);
+            throw createError;
+        }
 
+        console.log('✅ Novo cliente criado:', newClient);
         // Adicionar ao cache
         clientsCache.set(newClient.id, newClient);
         
         return newClient;
     } catch (error) {
-        console.error('Erro ao buscar/criar cliente:', error);
+        console.error('❌ Erro ao buscar/criar cliente:', error);
         throw error;
     }
 }
@@ -210,6 +224,421 @@ async function checkTimeConflictSupabase(date, startTime, endTime, excludeId = n
         console.error('Erro ao verificar conflitos:', error);
         return { conflict: false };
     }
+}
+
+// Função de teste para verificar a view
+async function testViewData() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        console.log('🧪 Testando view vw_agendamentos_completos...');
+        
+        const { data, error } = await supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('*')
+            .limit(5);
+        
+        if (error) {
+            console.error('❌ Erro na view:', error);
+            return;
+        }
+        
+        console.log('✅ Dados da view:', data);
+        
+        // Testar também as tabelas individuais
+        const { data: agendamentos } = await supabaseClient
+            .from('agendamentos')
+            .select('*')
+            .limit(3);
+        
+        const { data: clientes } = await supabaseClient
+            .from('clientes')
+            .select('*')
+            .limit(3);
+        
+        console.log('📊 Agendamentos diretos:', agendamentos);
+        console.log('👥 Clientes diretos:', clientes);
+        
+    } catch (error) {
+        console.error('❌ Erro no teste:', error);
+    }
+}
+
+// Função para comparar dados entre loadAppointments e loadTodayAppointments
+async function compareAppointmentData() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        console.log('🔍 Comparando dados entre loadAppointments e loadTodayAppointments...');
+        
+        const today = new Date().toISOString().split('T')[0];
+        const startDate = `${today}T00:00:00`;
+        const endDate = `${today}T23:59:59`;
+        
+        // Query similar ao loadAppointments (sem filtros)
+        const { data: allData, error: allError } = await supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('*')
+            .order('data_horario', { ascending: true });
+        
+        if (allError) {
+            console.error('❌ Erro ao buscar todos os dados:', allError);
+            return;
+        }
+        
+        // Query similar ao loadTodayAppointments (filtrado por hoje)
+        const { data: todayData, error: todayError } = await supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('*')
+            .gte('data_horario', startDate)
+            .lte('data_horario', endDate)
+            .order('horario_inicio', { ascending: true });
+        
+        if (todayError) {
+            console.error('❌ Erro ao buscar dados de hoje:', todayError);
+            return;
+        }
+        
+        console.log('📊 Todos os dados (loadAppointments style):', allData);
+        console.log('🏠 Dados de hoje (loadTodayAppointments style):', todayData);
+        
+        // Verificar se há dados de hoje nos dados gerais
+        const todayFromAll = allData.filter(apt => {
+            const aptDate = new Date(apt.data_horario).toISOString().split('T')[0];
+            return aptDate === today;
+        });
+        
+        console.log('🔍 Dados de hoje extraídos dos dados gerais:', todayFromAll);
+        
+        // Comparar campos específicos
+        if (todayData && todayData.length > 0) {
+            console.log('🔍 Primeiro item de hoje - campos importantes:');
+            console.log('- cliente_nome:', todayData[0].cliente_nome);
+            console.log('- cliente_telefone:', todayData[0].cliente_telefone);
+            console.log('- servico_nome:', todayData[0].servico_nome);
+        }
+        
+        if (todayFromAll && todayFromAll.length > 0) {
+            console.log('🔍 Primeiro item de hoje (dos dados gerais) - campos importantes:');
+            console.log('- cliente_nome:', todayFromAll[0].cliente_nome);
+            console.log('- cliente_telefone:', todayFromAll[0].cliente_telefone);
+            console.log('- servico_nome:', todayFromAll[0].servico_nome);
+        }
+        
+    } catch (error) {
+        console.error('❌ Erro na comparação:', error);
+    }
+}
+
+// Função para testar queries diretas nas tabelas (sem view)
+async function testDirectQueries() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        console.log('🔍 Testando queries diretas nas tabelas...');
+        
+        const today = new Date().toISOString().split('T')[0];
+        const startDate = `${today}T00:00:00`;
+        const endDate = `${today}T23:59:59`;
+        
+        // Query direta com JOINs manuais
+        const { data: directData, error: directError } = await supabaseClient
+            .from('agendamentos')
+            .select(`
+                id,
+                data_horario,
+                horario_inicio,
+                horario_fim,
+                status,
+                preco_cobrado,
+                observacoes,
+                clientes!inner(nome, telefone),
+                servicos!inner(nome, duracao_minutos)
+            `)
+            .gte('data_horario', startDate)
+            .lte('data_horario', endDate)
+            .order('horario_inicio', { ascending: true });
+        
+        if (directError) {
+            console.error('❌ Erro na query direta:', directError);
+            return;
+        }
+        
+        console.log('🎯 Dados da query direta:', directData);
+        
+        // Mapear dados para formato compatível
+        const mappedData = directData.map(apt => ({
+            id: apt.id,
+            data_horario: apt.data_horario,
+            horario_inicio: apt.horario_inicio,
+            horario_fim: apt.horario_fim,
+            status: apt.status,
+            preco_cobrado: apt.preco_cobrado,
+            observacoes: apt.observacoes,
+            cliente_nome: apt.clientes.nome,
+            cliente_telefone: apt.clientes.telefone,
+            servico_nome: apt.servicos.nome,
+            duracao_minutos: apt.servicos.duracao_minutos,
+            valor_pago: 0, // Simplificado para teste
+            valor_pendente: apt.preco_cobrado,
+            status_pagamento: 'pendente'
+        }));
+        
+        console.log('🎯 Dados mapeados da query direta:', mappedData);
+        
+        // Comparar com a view
+        const { data: viewData, error: viewError } = await supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('*')
+            .gte('data_horario', startDate)
+            .lte('data_horario', endDate)
+            .order('horario_inicio', { ascending: true });
+        
+        if (viewError) {
+            console.error('❌ Erro na view:', viewError);
+        } else {
+            console.log('📊 Dados da view para comparação:', viewData);
+        }
+        
+    } catch (error) {
+        console.error('❌ Erro no teste de queries diretas:', error);
+    }
+}
+
+// Versão alternativa do loadAppointments usando query direta
+async function loadAppointmentsDirect() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado - usando dados de exemplo');
+        renderAppointmentsTable(getExampleAppointments());
+        return;
+    }
+    
+    try {
+        showLoading();
+        console.log('🔄 Carregando agendamentos com query direta...');
+        
+        // Query direta com JOINs
+        const { data: appointments, error } = await supabaseClient
+            .from('agendamentos')
+            .select(`
+                id,
+                data_horario,
+                horario_inicio,
+                horario_fim,
+                status,
+                preco_cobrado,
+                observacoes,
+                cliente_id,
+                servico_id,
+                clientes!inner(nome, telefone),
+                servicos!inner(nome, duracao_minutos, preco)
+            `)
+            .order('data_horario', { ascending: true });
+        
+        if (error) {
+            console.error('❌ Erro ao carregar agendamentos:', error);
+            throw error;
+        }
+        
+        console.log('📊 Dados brutos da query direta:', appointments);
+        
+        // Buscar pagamentos separadamente para evitar problemas de GROUP BY
+        const appointmentIds = appointments.map(apt => apt.id);
+        let paymentsData = [];
+        
+        if (appointmentIds.length > 0) {
+            const { data: payments, error: paymentsError } = await supabaseClient
+                .from('pagamentos')
+                .select('agendamento_id, valor_pago')
+                .in('agendamento_id', appointmentIds);
+            
+            if (!paymentsError) {
+                paymentsData = payments || [];
+            }
+        }
+        
+        // Mapear dados para formato compatível
+        const mappedAppointments = appointments.map(apt => {
+            const totalPaid = paymentsData
+                .filter(p => p.agendamento_id === apt.id)
+                .reduce((sum, p) => sum + parseFloat(p.valor_pago || 0), 0);
+            
+            const valorPendente = Math.max(0, parseFloat(apt.preco_cobrado || 0) - totalPaid);
+            
+            return {
+                id: apt.id,
+                data_horario: apt.data_horario,
+                horario_inicio: apt.horario_inicio,
+                horario_fim: apt.horario_fim,
+                status: apt.status,
+                preco_cobrado: apt.preco_cobrado,
+                observacoes: apt.observacoes,
+                cliente_id: apt.cliente_id,
+                servico_id: apt.servico_id,
+                cliente_nome: apt.clientes?.nome || 'Cliente não encontrado',
+                cliente_telefone: apt.clientes?.telefone || '',
+                servico_nome: apt.servicos?.nome || 'Serviço não encontrado',
+                duracao_minutos: apt.servicos?.duracao_minutos || 0,
+                valor_pago: totalPaid,
+                valor_pendente: valorPendente,
+                status_pagamento: valorPendente > 0 ? 'pendente' : 'pago'
+            };
+        });
+        
+        console.log('🎯 Dados mapeados:', mappedAppointments);
+        renderAppointmentsTable(mappedAppointments);
+        
+    } catch (error) {
+        console.error('❌ Erro ao carregar agendamentos:', error);
+        showNotification('Erro ao carregar agendamentos: ' + error.message, 'error');
+        renderAppointmentsTable(getExampleAppointments());
+    } finally {
+        hideLoading();
+    }
+}
+
+// Versão alternativa do loadTodayAppointments usando query direta
+async function loadTodayAppointmentsDirect() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado - usando dados de exemplo');
+        renderTodaySchedule(getExampleTodayAppointments());
+        return;
+    }
+    
+    try {
+        console.log('🔄 Carregando agendamentos de hoje com query direta...');
+        
+        const today = new Date().toISOString().split('T')[0];
+        const startDate = `${today}T00:00:00`;
+        const endDate = `${today}T23:59:59`;
+        
+        // Query direta com JOINs
+        const { data: appointments, error } = await supabaseClient
+            .from('agendamentos')
+            .select(`
+                id,
+                data_horario,
+                horario_inicio,
+                horario_fim,
+                status,
+                preco_cobrado,
+                observacoes,
+                cliente_id,
+                servico_id,
+                clientes!inner(nome, telefone),
+                servicos!inner(nome, duracao_minutos, preco)
+            `)
+            .gte('data_horario', startDate)
+            .lte('data_horario', endDate)
+            .order('horario_inicio', { ascending: true });
+        
+        if (error) {
+            console.error('❌ Erro ao carregar agendamentos de hoje:', error);
+            throw error;
+        }
+        
+        console.log('📊 Dados brutos de hoje (query direta):', appointments);
+        
+        // Buscar pagamentos separadamente
+        const appointmentIds = appointments.map(apt => apt.id);
+        let paymentsData = [];
+        
+        if (appointmentIds.length > 0) {
+            const { data: payments, error: paymentsError } = await supabaseClient
+                .from('pagamentos')
+                .select('agendamento_id, valor_pago')
+                .in('agendamento_id', appointmentIds);
+            
+            if (!paymentsError) {
+                paymentsData = payments || [];
+            }
+        }
+        
+        // Mapear dados para formato compatível
+        const mappedAppointments = appointments.map(apt => {
+            const totalPaid = paymentsData
+                .filter(p => p.agendamento_id === apt.id)
+                .reduce((sum, p) => sum + parseFloat(p.valor_pago || 0), 0);
+            
+            const valorPendente = Math.max(0, parseFloat(apt.preco_cobrado || 0) - totalPaid);
+            
+            return {
+                id: apt.id,
+                data_horario: apt.data_horario,
+                horario_inicio: apt.horario_inicio,
+                horario_fim: apt.horario_fim,
+                status: apt.status,
+                preco_cobrado: apt.preco_cobrado,
+                observacoes: apt.observacoes,
+                cliente_id: apt.cliente_id,
+                servico_id: apt.servico_id,
+                cliente_nome: apt.clientes?.nome || 'Cliente não encontrado',
+                cliente_telefone: apt.clientes?.telefone || '',
+                servico_nome: apt.servicos?.nome || 'Serviço não encontrado',
+                duracao_minutos: apt.servicos?.duracao_minutos || 0,
+                valor_pago: totalPaid,
+                valor_pendente: valorPendente,
+                status_pagamento: valorPendente > 0 ? 'pendente' : 'pago'
+            };
+        });
+        
+        console.log('🎯 Dados de hoje mapeados:', mappedAppointments);
+        renderTodaySchedule(mappedAppointments);
+        
+    } catch (error) {
+        console.error('❌ Erro ao carregar agendamentos de hoje:', error);
+        showNotification('Erro ao carregar agendamentos de hoje: ' + error.message, 'error');
+        renderTodaySchedule(getExampleTodayAppointments());
+    }
+}
+
+// Função para testar e comparar as duas abordagens
+async function testBothApproaches() {
+    console.log('🔬 === TESTE COMPARATIVO: VIEW vs QUERY DIRETA ===');
+    
+    console.log('\n1️⃣ Testando com VIEW (método atual):');
+    await compareAppointmentData();
+    
+    console.log('\n2️⃣ Testando com QUERY DIRETA:');
+    await testDirectQueries();
+    
+    console.log('\n3️⃣ Carregando dados com QUERY DIRETA:');
+    console.log('📊 Carregando todos os agendamentos...');
+    await loadAppointmentsDirect();
+    
+    console.log('🏠 Carregando agendamentos de hoje...');
+    await loadTodayAppointmentsDirect();
+    
+    console.log('\n✅ Teste completo! Verifique os logs acima para comparar os resultados.');
+}
+
+// Função para alternar para o modo de query direta permanentemente
+function switchToDirectMode() {
+    console.log('🔄 Alternando para modo de query direta...');
+    
+    // Substituir as funções originais pelas versões diretas
+    window.loadAppointments = loadAppointmentsDirect;
+    window.loadTodayAppointments = loadTodayAppointmentsDirect;
+    
+    console.log('✅ Modo alterado! As próximas chamadas usarão queries diretas.');
+    console.log('💡 Para testar, navegue entre as abas ou recarregue os dados.');
+}
+
+// Função para voltar ao modo original (view)
+function switchToViewMode() {
+    console.log('🔄 Voltando para modo de view...');
+    
+    // Recarregar a página para restaurar as funções originais
+    location.reload();
 }
 
 // Função para normalizar telefone - remove todos os caracteres não numéricos
@@ -376,7 +805,7 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
     setupEventListeners();
     loadAllClients();
-    setupClientAutocomplete();
+    setupAllClientAutocomplete();
     
     // Definir data de hoje por padrão
     const today = new Date().toISOString().split('T')[0];
@@ -452,7 +881,23 @@ function setupEventListeners() {
     // Modal
     document.querySelector('.close').addEventListener('click', closeModal);
     document.querySelector('.btn-cancel').addEventListener('click', closeModal);
-    document.querySelector('.btn-save').addEventListener('click', saveAppointment);
+    // Remover listener genérico que conflita com o modal de adicionar
+
+    // Listener dedicado ao formulário de adicionar (evita conflito)
+    const addForm = document.getElementById('addForm');
+    if (addForm) {
+        addForm.addEventListener('submit', (e) => {
+            // Impedir múltiplos envios
+            if (addForm.dataset.submitting === 'true') {
+                e.preventDefault();
+                return;
+            }
+            addForm.dataset.submitting = 'true';
+            addNewAppointment(e).finally(() => {
+                delete addForm.dataset.submitting;
+            });
+        });
+    }
     
     // Filtros
     document.getElementById('dateFilter').addEventListener('change', loadAppointments);
@@ -561,6 +1006,9 @@ function showSection(sectionId) {
 async function loadDashboardData() {
     showLoading();
     try {
+        // Carregar serviços primeiro
+        await loadServices();
+        
         // Carregar dados sequencialmente para garantir que appointments seja carregado primeiro
         await loadAppointments();
         
@@ -615,24 +1063,36 @@ async function loadAppointments() {
         
         if (error) throw error;
         
+        console.log('📊 Dados brutos da view vw_agendamentos_completos:', data);
+        
         // Mapear dados da view para formato compatível
-        appointments = (data || []).map(apt => ({
-            id: apt.id,
-            data_horario: apt.data_horario,
-            horario_inicio: apt.horario_inicio,
-            horario_fim: apt.horario_fim,
-            status: apt.status,
-            preco: apt.preco_cobrado,
-            observacoes: apt.observacoes,
-            nome_cliente: apt.cliente_nome,
-            telefone: apt.cliente_telefone,
-            servico: apt.servico_nome,
-            duracao_minutos: apt.duracao_minutos,
-            valor_pago: apt.valor_pago,
-            valor_pendente: apt.valor_pendente,
-            pagamento: apt.status_pagamento,
-            forma_pagamento: apt.status_pagamento === 'pago' ? 'pago' : 'pendente'
-        }));
+        appointments = (data || []).map(apt => {
+            console.log('🔍 Processando agendamento da view:', apt);
+            console.log('🔍 Campos disponíveis:', Object.keys(apt));
+            
+            const mapped = {
+                id: apt.id,
+                data_horario: apt.data_horario,
+                horario_inicio: apt.horario_inicio,
+                horario_fim: apt.horario_fim,
+                status: apt.status,
+                preco_cobrado: parseFloat(apt.preco_cobrado) || 0,
+                observacoes: apt.observacoes,
+                cliente_nome: (apt.cliente_nome && String(apt.cliente_nome).trim() && !['undefined','null'].includes(String(apt.cliente_nome).trim().toLowerCase())) ? apt.cliente_nome : 'Cliente não identificado',
+                telefone: (apt.cliente_telefone && String(apt.cliente_telefone).trim() && !['undefined','null'].includes(String(apt.cliente_telefone).trim().toLowerCase())) ? apt.cliente_telefone : '',
+                servico: apt.servico_nome, 
+                duracao_minutos: apt.duracao_minutos,
+                valor_pago: apt.valor_pago || 0,
+                valor_pendente: apt.valor_pendente || 0,
+                pagamento: apt.status_pagamento,
+                forma_pagamento: apt.status_pagamento === 'pago' ? 'pago' : 'pendente'
+            };
+            
+            console.log('✅ Agendamento mapeado:', mapped);
+            console.log('✅ Cliente nome final:', mapped.cliente_nome);
+            console.log('✅ Serviço final:', mapped.servico);
+            return mapped;
+        });
         
         renderAppointmentsTable();
         
@@ -655,6 +1115,9 @@ async function loadTodayAppointments() {
         const startDate = `${selectedDate}T00:00:00`;
         const endDate = `${selectedDate}T23:59:59`;
         
+        console.log('🏠 loadTodayAppointments - Data selecionada:', selectedDate);
+        console.log('🏠 loadTodayAppointments - Período:', startDate, 'até', endDate);
+        
         const { data, error } = await supabaseClient
             .from('vw_agendamentos_completos')
             .select('*')
@@ -664,24 +1127,37 @@ async function loadTodayAppointments() {
         
         if (error) throw error;
         
+        console.log('🏠 loadTodayAppointments - Dados brutos da view:', data);
+        
         // Mapear dados da view para formato compatível
-        todayAppointments = (data || []).map(apt => ({
-            id: apt.id,
-            data_horario: apt.data_horario,
-            horario_inicio: apt.horario_inicio,
-            horario_fim: apt.horario_fim,
-            status: apt.status,
-            preco: apt.preco_cobrado,
-            observacoes: apt.observacoes,
-            nome_cliente: apt.cliente_nome,
-            telefone: apt.cliente_telefone,
-            servico: apt.servico_nome,
-            duracao_minutos: apt.duracao_minutos,
-            valor_pago: apt.valor_pago,
-            valor_pendente: apt.valor_pendente,
-            pagamento: apt.status_pagamento,
-            forma_pagamento: apt.status_pagamento === 'pago' ? 'pago' : 'pendente'
-        }));
+        todayAppointments = (data || []).map((apt, index) => {
+            console.log(`🏠 loadTodayAppointments - Processando item ${index + 1}:`, apt);
+            console.log(`🏠 loadTodayAppointments - Campos disponíveis:`, Object.keys(apt));
+            
+            const mapped = {
+                id: apt.id,
+                data_horario: apt.data_horario,
+                horario_inicio: apt.horario_inicio,
+                horario_fim: apt.horario_fim,
+                status: apt.status,
+                preco_cobrado: parseFloat(apt.preco_cobrado) || 0,
+                observacoes: apt.observacoes,
+                cliente_nome: (apt.cliente_nome && String(apt.cliente_nome).trim() && !['undefined','null'].includes(String(apt.cliente_nome).trim().toLowerCase())) ? apt.cliente_nome : 'Cliente não identificado',
+                telefone: (apt.cliente_telefone && String(apt.cliente_telefone).trim() && !['undefined','null'].includes(String(apt.cliente_telefone).trim().toLowerCase())) ? apt.cliente_telefone : '',
+                servico: apt.servico_nome, 
+                duracao_minutos: apt.duracao_minutos,
+                valor_pago: apt.valor_pago || 0,
+                valor_pendente: apt.valor_pendente || 0,
+                pagamento: apt.status_pagamento,
+                forma_pagamento: apt.status_pagamento === 'pago' ? 'pago' : 'pendente'
+            };
+            
+            console.log(`🏠 loadTodayAppointments - Item mapeado ${index + 1}:`, mapped);
+            console.log(`🏠 loadTodayAppointments - Cliente: "${mapped.cliente_nome}", Serviço: "${mapped.servico}"`);
+            return mapped;
+        });
+        
+        console.log('🏠 loadTodayAppointments - Array final todayAppointments:', todayAppointments);
         renderTodaySchedule();
         
     } catch (error) {
@@ -849,6 +1325,21 @@ function renderAppointmentsTable() {
     }
     
     appointments.forEach(appointment => {
+        console.log('🎨 Renderizando agendamento na tabela:', appointment);
+        
+        // Garantir que todos os valores necessários existam (evitar string "undefined"/"null")
+        const rawNome = appointment?.cliente_nome ?? appointment?.nome_cliente ?? appointment?.nome ?? '';
+        const clienteNome = (typeof rawNome === 'string' && rawNome.trim() && !['undefined','null'].includes(rawNome.trim().toLowerCase())) ? rawNome : 'Cliente não identificado';
+        
+        const rawTelefone = appointment?.telefone ?? appointment?.cliente_telefone ?? '';
+        const telefone = (typeof rawTelefone === 'string' && rawTelefone.trim() && !['undefined','null'].includes(rawTelefone.trim().toLowerCase())) ? formatPhoneDisplay(rawTelefone) : 'Telefone não informado';
+        
+        const rawServico = appointment?.servico ?? appointment?.nome_servico ?? appointment?.servico_nome ?? '';
+        const servicoNome = (typeof rawServico === 'string' && rawServico.trim() && !['undefined','null'].includes(rawServico.trim().toLowerCase())) ? rawServico : 'Serviço';
+        const status = appointment.status || 'agendado';
+        const appointmentId = appointment.id || appointment.agendamento_id || 0;
+        const precoCobrando = parseFloat(appointment.preco_cobrado ?? appointment.preco ?? 0) || 0;
+        
         const row = document.createElement('tr');
         const appointmentDate = new Date(appointment.data_horario);
         const dateStr = appointmentDate.toLocaleDateString('pt-BR');
@@ -860,19 +1351,33 @@ function renderAppointmentsTable() {
             timeStr += ` - ${endTime}`;
         }
         
+        // Se timeStr estiver vazio, usar um valor padrão
+        if (!timeStr) {
+            timeStr = '00:00';
+        }
+        
+        console.log('📋 Dados para renderização:', {
+            clienteNome,
+            telefone,
+            servicoNome,
+            status,
+            appointmentId,
+            precoCobrando
+        });
+        
         row.innerHTML = `
-            <td>${appointment.cliente_nome}</td>
-            <td>${appointment.telefone}</td>
-            <td>${appointment.servico || 'Corte'}</td>
+            <td>${clienteNome}</td>
+            <td>${telefone}</td>
+            <td>${servicoNome}</td>
             <td>${dateStr}</td>
             <td>${timeStr}</td>
-            <td>R$ ${(appointment.preco_cobrado || 0).toFixed(2)}</td>
-            <td><span class="status-badge status-${appointment.status}">${appointment.status}</span></td>
+            <td>R$ ${precoCobrando.toFixed(2)}</td>
+            <td><span class="status-badge status-${status}">${status}</span></td>
             <td>
-                <button class="action-btn btn-edit" onclick="editAppointment(${appointment.id})">
+                <button class="action-btn btn-edit" onclick="editAppointment(${appointmentId})">
                     <i class="fas fa-edit"></i>
                 </button>
-                <button class="action-btn btn-delete" onclick="deleteAppointment(${appointment.id})">
+                <button class="action-btn btn-delete" onclick="deleteAppointment(${appointmentId})">
                     <i class="fas fa-trash"></i>
                 </button>
             </td>
@@ -888,12 +1393,15 @@ function renderTodaySchedule() {
         return;
     }
     
+    console.log('🏠 renderTodaySchedule - Iniciando renderização da visão geral');
+    console.log('🏠 todayAppointments array:', todayAppointments);
+    
     // Renderizando agendamentos de hoje
     container.innerHTML = '';
     
     if (todayAppointments.length === 0) {
         container.innerHTML = '<p style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px;">Nenhum agendamento para hoje</p>';
-        // Nenhum agendamento para hoje
+        console.log('🏠 Nenhum agendamento para hoje');
         return;
     }
 
@@ -904,9 +1412,31 @@ function renderTodaySchedule() {
         return timeA.localeCompare(timeB);
     });
 
+    console.log('🏠 Agendamentos ordenados:', sortedAppointments);
+
     // Renderizar cada agendamento
     let htmlContent = '';
-    sortedAppointments.forEach(appointment => {
+    sortedAppointments.forEach((appointment, index) => {
+        console.log(`🏠 Processando agendamento ${index + 1}:`, appointment);
+        
+        // Garantir que todos os valores necessários existam (evitar string "undefined"/"null")
+        const rawNome = appointment?.cliente_nome ?? appointment?.nome_cliente ?? appointment?.nome ?? '';
+        const clienteNome = (typeof rawNome === 'string' && rawNome.trim() && !['undefined','null'].includes(rawNome.trim().toLowerCase())) ? rawNome : 'Cliente não identificado';
+        const rawServico = appointment?.servico ?? appointment?.nome_servico ?? appointment?.servico_nome ?? '';
+        const servicoNome = (typeof rawServico === 'string' && rawServico.trim() && !['undefined','null'].includes(rawServico.trim().toLowerCase())) ? rawServico : 'Serviço';
+        const rawTelefone = appointment?.telefone ?? appointment?.cliente_telefone ?? '';
+        const telefone = (typeof rawTelefone === 'string' && rawTelefone.trim() && !['undefined','null'].includes(rawTelefone.trim().toLowerCase())) ? formatPhoneDisplay(rawTelefone) : '';
+        const status = appointment.status || 'agendado';
+        const appointmentId = appointment.id || appointment.agendamento_id || 0;
+        
+        console.log(`🏠 Valores mapeados:`, {
+            clienteNome,
+            servicoNome,
+            telefone,
+            status,
+            appointmentId
+        });
+        
         const appointmentDate = new Date(appointment.data_horario);
         
         // Formatar horário com início e fim
@@ -916,21 +1446,26 @@ function renderTodaySchedule() {
             timeStr += ` - ${endTime}`;
         }
         
-        // Renderizando agendamento
+        // Se timeStr estiver vazio, usar um valor padrão
+        if (!timeStr) {
+            timeStr = '00:00';
+        }
+        
+        console.log(`🏠 Valores finais - Cliente: "${clienteNome}", Serviço: "${servicoNome}", Horário: "${timeStr}"`);
         
         htmlContent += `
             <div class="schedule-item" data-period="${getTimePeriod(appointment)}">
                 <div class="schedule-item-info">
                     <div class="schedule-time">${timeStr}</div>
-                    <div class="schedule-client">${appointment.cliente_nome}</div>
-                    <div class="schedule-service">${appointment.servico || 'Corte'}</div>
+                    <div class="schedule-client">${clienteNome}</div>
+                    <div class="schedule-service">${servicoNome}</div>
                 </div>
                 <div class="schedule-actions">
-                    <span class="status-badge status-${appointment.status}">${appointment.status}</span>
-                    <button class="action-btn btn-edit" onclick="window.editAppointment(${appointment.id})" title="Editar" data-id="${appointment.id}">
+                    <span class="status-badge status-${status}">${status}</span>
+                    <button class="action-btn btn-edit" onclick="window.editAppointment(${appointmentId})" title="Editar" data-id="${appointmentId}">
                         <i class="fas fa-edit"></i>
                     </button>
-                    <button class="action-btn btn-delete" onclick="window.deleteAppointment(${appointment.id})" title="Excluir" data-id="${appointment.id}">
+                    <button class="action-btn btn-delete" onclick="window.deleteAppointment(${appointmentId})" title="Excluir" data-id="${appointmentId}">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -938,6 +1473,7 @@ function renderTodaySchedule() {
         `;
     });
     
+    console.log('🏠 HTML final gerado:', htmlContent);
     container.innerHTML = htmlContent;
     
     // Adicionar event listeners programaticamente como backup
@@ -1403,8 +1939,38 @@ function renderReports(data) {
 
 // Utilitários
 function formatDate(dateString) {
-    const date = new Date(dateString + 'T00:00:00');
-    return date.toLocaleDateString('pt-BR');
+    if (!dateString) return 'N/A';
+    
+    try {
+        let date;
+        
+        // Se já é um objeto Date
+        if (dateString instanceof Date) {
+            date = dateString;
+        }
+        // Se é uma string ISO completa (com horário)
+        else if (typeof dateString === 'string' && dateString.includes('T')) {
+            date = new Date(dateString);
+        }
+        // Se é uma string de data simples (YYYY-MM-DD)
+        else if (typeof dateString === 'string' && dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            date = new Date(dateString + 'T00:00:00');
+        }
+        // Outros formatos
+        else {
+            date = new Date(dateString);
+        }
+        
+        // Verificar se a data é válida
+        if (isNaN(date.getTime())) {
+            return 'Data inválida';
+        }
+        
+        return date.toLocaleDateString('pt-BR');
+    } catch (error) {
+        console.error('Erro ao formatar data:', error, dateString);
+        return 'Data inválida';
+    }
 }
 
 function setDateToToday(inputId = 'currentDate') {
@@ -1615,7 +2181,7 @@ async function saveAppointment() {
         }
         
         // Buscar ou criar cliente
-        const cliente = await findOrCreateClient(clienteNome, clienteTelefone);
+        const cliente = await findOrCreateClient(clienteTelefone, clienteNome);
         if (!cliente) {
             throw new Error('Erro ao processar dados do cliente');
         }
@@ -1749,84 +2315,44 @@ async function deleteAppointment(id) {
     }
 }
 
-// Função para excluir cliente
-async function deleteClient(telefone) {
+// Função para excluir cliente (versão antiga - mantida para compatibilidade)
+async function deleteClientOld(telefone) {
     if (!confirm('Tem certeza que deseja excluir este cliente? Todos os agendamentos relacionados também serão excluídos.')) {
         return;
     }
     
-    // Excluindo cliente...
-    
     try {
         if (!supabaseClient) {
-            console.error('❌ Supabase não configurado - não é possível excluir cliente');
-            alert('Erro: Supabase não configurado. Configure o arquivo config.js');
+            showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
             return;
         }
         
-        // Excluindo cliente do Supabase
+        showLoading();
         
         // Buscar cliente pelo telefone
         const normalizedPhone = normalizePhone(telefone);
         const { data: clientData, error: clientError } = await supabaseClient
             .from('clientes')
-            .select('id')
+            .select('id, nome')
             .eq('telefone', normalizedPhone)
             .single();
         
-        if (clientError && clientError.code !== 'PGRST116') { // PGRST116 = not found
+        if (clientError && clientError.code !== 'PGRST116') {
             throw clientError;
         }
         
         if (clientData) {
-            // Excluir todos os agendamentos do cliente
-            const { error: appointmentsError } = await supabaseClient
-                .from('agendamentos')
-                .delete()
-                .eq('cliente_id', clientData.id);
-            
-            if (appointmentsError) {
-                console.error('Erro ao excluir agendamentos:', appointmentsError);
-                throw appointmentsError;
-            }
-            
-            // Excluir pagamentos do cliente
-            const { error: paymentsError } = await supabaseClient
-                .from('pagamentos')
-                .delete()
-                .eq('cliente_id', clientData.id);
-            
-            if (paymentsError) {
-                console.error('Erro ao excluir pagamentos:', paymentsError);
-                // Não falhar se não conseguir excluir pagamentos
-            }
-            
-            // Excluir cliente
-            const { error: deleteClientError } = await supabaseClient
-                .from('clientes')
-                .delete()
-                .eq('id', clientData.id);
-            
-            if (deleteClientError) {
-                console.error('Erro ao excluir cliente:', deleteClientError);
-                throw deleteClientError;
-            }
+            // Usar a nova função de exclusão
+            await deleteClient(clientData.id, clientData.nome);
+        } else {
+            showNotification('Cliente não encontrado.', 'warning');
         }
-        
-        // Recarregar todas as visualizações
-        await loadAppointments();
-        await loadTodayAppointments();
-        await loadOverviewData();
-        await loadScheduleGrid();
-        await loadAllClients();
-        await loadClients();
-        
-        alert('Cliente e todos os seus agendamentos foram excluídos com sucesso!');
-        // Cliente excluído com sucesso
         
     } catch (error) {
         console.error('Erro ao excluir cliente:', error);
-        alert('Erro ao excluir cliente: ' + (error.message || 'Erro desconhecido'));
+        showNotification('Erro ao excluir cliente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -2025,7 +2551,7 @@ function renderClientsGrid(clients) {
         card.innerHTML = `
             <div class="client-header">
                 <h4>${client.nome}</h4>
-                <button class="client-delete-btn" onclick="deleteClient('${client.telefone}')" title="Excluir Cliente">
+                <button class="client-delete-btn" onclick="deleteClient(${client.id}, '${client.nome}')" title="Excluir Cliente">
                     <i class="fas fa-trash"></i>
                 </button>
             </div>
@@ -2090,28 +2616,40 @@ function closeAddModal() {
     document.getElementById('addModal').style.display = 'none';
 }
 
-// Função para atualizar preço baseado no serviço selecionado
-function updateServicePrice() {
+// Função para atualizar preço baseado no serviço selecionado (modal adicionar)
+function updateAddServicePrice() {
     const servicoSelect = document.getElementById('addServico');
     const precoInput = document.getElementById('addPreco');
-    const selectedOption = servicoSelect.options[servicoSelect.selectedIndex];
     
-    if (selectedOption && selectedOption.dataset.price) {
-        precoInput.value = selectedOption.dataset.price;
+    // Limpar o campo de preço para que o barbeiro defina
+    if (servicoSelect.value) {
+        precoInput.value = '';
+        precoInput.focus();
     } else {
         precoInput.value = '';
     }
 }
 
+// Função para atualizar preço baseado no serviço selecionado (modal editar)
 function updateEditServicePrice() {
     const servicoSelect = document.getElementById('editServico');
     const precoInput = document.getElementById('editPreco');
-    const selectedOption = servicoSelect.options[servicoSelect.selectedIndex];
     
-    if (selectedOption && selectedOption.dataset.price) {
-        precoInput.value = selectedOption.dataset.price;
-    } else {
+    // Limpar o campo de preço para que o barbeiro defina
+    if (servicoSelect.value) {
+        precoInput.focus();
+    }
+}
+
+// Função para atualizar preço baseado no serviço selecionado (modal inadimplentes)
+function updateUnpaidServicePrice() {
+    const servicoSelect = document.getElementById('addUnpaidServico');
+    const precoInput = document.getElementById('addUnpaidValor');
+    
+    // Limpar o campo de preço para que o barbeiro defina
+    if (servicoSelect.value && precoInput) {
         precoInput.value = '';
+        precoInput.focus();
     }
 }
 
@@ -2136,9 +2674,49 @@ async function addNewAppointment(event) {
         const status = document.getElementById('addStatus').value;
         const observacoes = document.getElementById('addObservacoes').value.trim();
         
-        // Validações
-        if (!clienteNome || !servico || !data || !horarioInicio || !horarioFim) {
-            alert('Por favor, preencha todos os campos obrigatórios.');
+        // Validações detalhadas
+        console.log('Validando campos:', {
+            clienteNome,
+            servico,
+            data,
+            horarioInicio,
+            horarioFim,
+            preco
+        });
+        
+        if (!clienteNome) {
+            alert('Por favor, preencha o nome do cliente.');
+            document.getElementById('addNome').focus();
+            return;
+        }
+        
+        if (!servico) {
+            alert('Por favor, selecione um serviço.');
+            document.getElementById('addServico').focus();
+            return;
+        }
+        
+        if (!data) {
+            alert('Por favor, selecione uma data.');
+            document.getElementById('addData').focus();
+            return;
+        }
+        
+        if (!horarioInicio) {
+            alert('Por favor, selecione o horário de início.');
+            document.getElementById('addHorarioInicio').focus();
+            return;
+        }
+        
+        if (!horarioFim) {
+            alert('Por favor, selecione o horário de fim.');
+            document.getElementById('addHorarioFim').focus();
+            return;
+        }
+        
+        if (!preco || preco <= 0) {
+            alert('Por favor, informe o preço do serviço.');
+            document.getElementById('addPreco').focus();
             return;
         }
         
@@ -2156,7 +2734,7 @@ async function addNewAppointment(event) {
         }
         
         // Buscar ou criar cliente
-        const cliente = await findOrCreateClient(clienteNome, clienteTelefone);
+        const cliente = await findOrCreateClient(clienteTelefone, clienteNome);
         if (!cliente) {
             throw new Error('Erro ao processar dados do cliente');
         }
@@ -2257,9 +2835,344 @@ window.onclick = function(event) {
 // Adicionar event listeners quando o DOM estiver carregado
 document.addEventListener('DOMContentLoaded', function() {
     // Tornar funções disponíveis globalmente
-    window.editAppointment = editAppointment;
-    window.deleteAppointment = deleteAppointment;
-    window.updateEditServicePrice = updateEditServicePrice;
+window.editAppointment = editAppointment;
+window.deleteAppointment = deleteAppointment;
+window.updateEditServicePrice = updateEditServicePrice;
+window.testViewData = testViewData;
+window.compareAppointmentData = compareAppointmentData;
+window.testDirectQueries = testDirectQueries;
+window.loadAppointmentsDirect = loadAppointmentsDirect;
+window.loadTodayAppointmentsDirect = loadTodayAppointmentsDirect;
+window.testBothApproaches = testBothApproaches;
+window.switchToDirectMode = switchToDirectMode;
+window.switchToViewMode = switchToViewMode;
+
+// Função de debug para verificar dados da view
+async function debugViewData() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        console.log('🔍 Testando consulta direta na view...');
+        
+        const { data, error } = await supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('*')
+            .limit(5);
+        
+        if (error) {
+            console.error('❌ Erro na consulta:', error);
+            return;
+        }
+        
+        console.log('✅ Dados da view (primeiros 5):', data);
+        
+        if (data && data.length > 0) {
+            console.log('📋 Estrutura do primeiro registro:', Object.keys(data[0]));
+            console.log('📋 Primeiro registro completo:', data[0]);
+        }
+        
+        return data;
+        
+    } catch (error) {
+        console.error('❌ Erro ao testar view:', error);
+    }
+}
+
+window.debugViewData = debugViewData;
+
+// Função para restaurar funcionamento básico
+async function restoreBasicFunctionality() {
+    console.log('🔧 Restaurando funcionamento básico...');
+    
+    try {
+        // Limpar arrays
+        appointments = [];
+        todayAppointments = [];
+        
+        // Recarregar dados
+        await loadDashboardData();
+        
+        console.log('✅ Funcionamento básico restaurado');
+        
+    } catch (error) {
+        console.error('❌ Erro ao restaurar funcionamento:', error);
+    }
+}
+
+window.restoreBasicFunctionality = restoreBasicFunctionality;
+
+// Função para testar se há dados na view
+async function testViewHasData() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        console.log('🔍 Testando se há dados na view...');
+        
+        // Testar contagem total
+        const { count, error: countError } = await supabaseClient
+            .from('vw_agendamentos_completos')
+            .select('*', { count: 'exact', head: true });
+        
+        if (countError) {
+            console.error('❌ Erro ao contar registros:', countError);
+            return;
+        }
+        
+        console.log(`📊 Total de registros na view: ${count}`);
+        
+        if (count === 0) {
+            console.log('⚠️ A view não tem dados. Vamos verificar as tabelas base...');
+            
+            // Verificar tabela agendamentos
+            const { count: agendamentosCount } = await supabaseClient
+                .from('agendamentos')
+                .select('*', { count: 'exact', head: true });
+            
+            console.log(`📊 Total de agendamentos: ${agendamentosCount}`);
+            
+            // Verificar tabela clientes
+            const { count: clientesCount } = await supabaseClient
+                .from('clientes')
+                .select('*', { count: 'exact', head: true });
+            
+            console.log(`📊 Total de clientes: ${clientesCount}`);
+            
+            // Verificar tabela servicos
+            const { count: servicosCount } = await supabaseClient
+                .from('servicos')
+                .select('*', { count: 'exact', head: true });
+            
+            console.log(`📊 Total de serviços: ${servicosCount}`);
+            
+            if (agendamentosCount === 0) {
+                console.log('⚠️ Não há agendamentos na base de dados');
+                return { hasData: false, reason: 'no_appointments' };
+            }
+        }
+        
+        // Se há dados, buscar alguns exemplos
+        if (count > 0) {
+            const { data, error } = await supabaseClient
+                .from('vw_agendamentos_completos')
+                .select('*')
+                .limit(3);
+            
+            if (error) {
+                console.error('❌ Erro ao buscar dados:', error);
+                return;
+            }
+            
+            console.log('✅ Exemplos de dados da view:', data);
+            return { hasData: true, count, examples: data };
+        }
+        
+    } catch (error) {
+        console.error('❌ Erro ao testar view:', error);
+    }
+}
+
+window.testViewHasData = testViewHasData;
+
+// Função para inserir dados de teste
+async function insertTestData() {
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        console.log('🔧 Inserindo dados de teste...');
+        
+        // 1. Inserir cliente de teste
+        const { data: cliente, error: clienteError } = await supabaseClient
+            .from('clientes')
+            .upsert({
+                telefone: '11999999999',
+                nome: 'Cliente Teste',
+                email: 'teste@email.com'
+            })
+            .select()
+            .single();
+        
+        if (clienteError) {
+            console.error('❌ Erro ao inserir cliente:', clienteError);
+            return;
+        }
+        
+        console.log('✅ Cliente inserido:', cliente);
+        
+        // 2. Inserir serviço de teste
+        const { data: servico, error: servicoError } = await supabaseClient
+            .from('servicos')
+            .upsert({
+                nome: 'Corte Teste',
+                preco_base: 30.00,
+                duracao_minutos: 30
+            })
+            .select()
+            .single();
+        
+        if (servicoError) {
+            console.error('❌ Erro ao inserir serviço:', servicoError);
+            return;
+        }
+        
+        console.log('✅ Serviço inserido:', servico);
+        
+        // 3. Inserir agendamento de teste para hoje
+        const hoje = new Date();
+        const dataHorario = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 14, 0, 0);
+        
+        const { data: agendamento, error: agendamentoError } = await supabaseClient
+            .from('agendamentos')
+            .insert({
+                cliente_id: cliente.id,
+                servico_id: servico.id,
+                data_horario: dataHorario.toISOString(),
+                horario_inicio: '14:00',
+                horario_fim: '14:30',
+                preco_cobrado: 30.00,
+                status: 'agendado'
+            })
+            .select()
+            .single();
+        
+        if (agendamentoError) {
+            console.error('❌ Erro ao inserir agendamento:', agendamentoError);
+            return;
+        }
+        
+        console.log('✅ Agendamento inserido:', agendamento);
+        
+        // 4. Testar a view novamente
+        await testViewHasData();
+        
+        // 5. Recarregar dados
+        await restoreBasicFunctionality();
+        
+        console.log('✅ Dados de teste inseridos com sucesso!');
+        
+    } catch (error) {
+        console.error('❌ Erro ao inserir dados de teste:', error);
+    }
+}
+
+window.insertTestData = insertTestData;
+
+// Função de diagnóstico completo
+async function fullDiagnostic() {
+    console.log('🔍 === DIAGNÓSTICO COMPLETO ===');
+    
+    // 1. Verificar configuração do Supabase
+    console.log('1. Verificando configuração do Supabase...');
+    if (!supabaseClient) {
+        console.error('❌ Supabase não configurado');
+        return;
+    }
+    console.log('✅ Supabase configurado');
+    
+    // 2. Verificar variáveis globais
+    console.log('2. Verificando variáveis globais...');
+    console.log('appointments:', typeof appointments, appointments?.length || 0);
+    console.log('todayAppointments:', typeof todayAppointments, todayAppointments?.length || 0);
+    
+    // 3. Testar dados na view
+    console.log('3. Testando dados na view...');
+    const viewResult = await testViewHasData();
+    
+    // 4. Se não há dados, sugerir inserir dados de teste
+    if (viewResult && !viewResult.hasData) {
+        console.log('⚠️ Não há dados na view. Execute insertTestData() para inserir dados de teste.');
+        return;
+    }
+    
+    // 5. Testar carregamento de dados
+    console.log('4. Testando carregamento de dados...');
+    try {
+        await loadAppointments();
+        await loadTodayAppointments();
+        console.log('✅ Dados carregados com sucesso');
+        console.log('appointments final:', appointments?.length || 0);
+        console.log('todayAppointments final:', todayAppointments?.length || 0);
+    } catch (error) {
+        console.error('❌ Erro ao carregar dados:', error);
+    }
+    
+    // 6. Verificar renderização
+    console.log('5. Verificando renderização...');
+    const container = document.getElementById('todayScheduleList');
+    if (container) {
+        console.log('✅ Container encontrado');
+        console.log('HTML atual:', container.innerHTML.substring(0, 200) + '...');
+    } else {
+        console.error('❌ Container todayScheduleList não encontrado');
+    }
+    
+    console.log('🔍 === FIM DO DIAGNÓSTICO ===');
+}
+
+window.fullDiagnostic = fullDiagnostic;
+
+// Função para reinicializar completamente o sistema
+async function fullReset() {
+    console.log('🔄 === REINICIALIZAÇÃO COMPLETA ===');
+    
+    try {
+        // 1. Limpar variáveis globais
+        console.log('1. Limpando variáveis globais...');
+        appointments = [];
+        todayAppointments = [];
+        
+        // 2. Limpar containers
+        console.log('2. Limpando containers...');
+        const todayContainer = document.getElementById('todayScheduleList');
+        const tableBody = document.getElementById('appointmentsTableBody');
+        
+        if (todayContainer) {
+            todayContainer.innerHTML = '<p style="color: rgba(255,255,255,0.5); text-align: center; padding: 20px;">Carregando...</p>';
+        }
+        
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: rgba(255,255,255,0.5);">Carregando...</td></tr>';
+        }
+        
+        // 3. Definir datas padrão
+        console.log('3. Definindo datas padrão...');
+        const today = new Date().toISOString().split('T')[0];
+        const currentDateInput = document.getElementById('currentDate');
+        const scheduleDateInput = document.getElementById('scheduleDate');
+        
+        if (currentDateInput) {
+            currentDateInput.value = today;
+        }
+        
+        if (scheduleDateInput) {
+            scheduleDateInput.value = today;
+        }
+        
+        // 4. Aguardar um pouco
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // 5. Recarregar todos os dados
+        console.log('4. Recarregando dados...');
+        await loadDashboardData();
+        
+        console.log('✅ Reinicialização completa finalizada!');
+        console.log('appointments:', appointments?.length || 0);
+        console.log('todayAppointments:', todayAppointments?.length || 0);
+        
+    } catch (error) {
+        console.error('❌ Erro durante reinicialização:', error);
+    }
+}
+
+window.fullReset = fullReset;
     
     // Event listener para o formulário de edição
     const editForm = document.getElementById('editForm');
@@ -2528,16 +3441,36 @@ async function contactClient(phone, name, appointmentId) {
 
 // Função para abrir modal de adicionar inadimplente
 function openAddUnpaidModal() {
+    console.log('Abrindo modal de inadimplente...');
     const modal = document.getElementById('addUnpaidModal');
+    
+    if (!modal) {
+        console.error('Modal addUnpaidModal não encontrado!');
+        alert('Erro: Modal não encontrado');
+        return;
+    }
+    
     modal.style.display = 'block';
+    console.log('Modal exibido');
     
     // Definir data padrão como hoje
     const today = new Date().toISOString().split('T')[0];
-    document.getElementById('addUnpaidData').value = today;
+    const dataField = document.getElementById('addUnpaidData');
+    
+    if (dataField) {
+        dataField.value = today;
+    }
     
     // Limpar formulário
-    document.getElementById('addUnpaidForm').reset();
-    document.getElementById('addUnpaidData').value = today;
+    const form = document.getElementById('addUnpaidForm');
+    if (form) {
+        form.reset();
+        if (dataField) {
+            dataField.value = today;
+        }
+    }
+    
+    console.log('Modal de inadimplente configurado com sucesso');
 }
 
 // Função para fechar modal de adicionar inadimplente
@@ -2554,16 +3487,16 @@ function updateUnpaidServicePrice() {
     const servicoSelect = document.getElementById('addUnpaidServico');
     const precoInput = document.getElementById('addUnpaidValor');
     
-    const selectedOption = servicoSelect.options[servicoSelect.selectedIndex];
-    const price = selectedOption.getAttribute('data-price');
-    
-    if (price) {
-        precoInput.value = price;
+    // Limpar o campo de preço para que o barbeiro defina o valor
+    if (servicoSelect.value) {
+        precoInput.value = '';
+        precoInput.focus();
     }
 }
 
 // Função para adicionar cliente inadimplente
 async function addUnpaidClient(event) {
+    console.log('🔄 Iniciando addUnpaidClient...');
     event.preventDefault();
     
     const clienteNome = document.getElementById('addUnpaidNome').value.trim();
@@ -2573,16 +3506,29 @@ async function addUnpaidClient(event) {
     const valorDevido = parseFloat(document.getElementById('addUnpaidValor').value) || 0;
     const observacoes = document.getElementById('addUnpaidObservacoes').value.trim();
     
+    console.log('📝 Dados coletados:', {
+        clienteNome,
+        clienteTelefone,
+        servico,
+        dataServico,
+        valorDevido,
+        observacoes
+    });
+    
     // Validações
     if (!clienteNome || !clienteTelefone || !servico || !dataServico || valorDevido <= 0) {
+        console.log('❌ Validação falhou');
         showNotification('Por favor, preencha todos os campos obrigatórios.', 'warning');
         return;
     }
     
     if (!supabaseClient) {
+        console.log('❌ Supabase não configurado');
         showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
         return;
     }
+    
+    console.log('✅ Validações passaram, prosseguindo...');
     
     try {
         showLoading();
@@ -2599,9 +3545,11 @@ async function addUnpaidClient(event) {
             .single();
         
         if (clienteExistente) {
-            clienteId = clienteExistente.id;
+            clienteId = parseInt(clienteExistente.id);
+            console.log('✅ Cliente existente encontrado, ID:', clienteId);
         } else {
             // Criar novo cliente
+            console.log('🆕 Criando novo cliente...');
             const { data: novoCliente, error: clienteError } = await supabaseClient
                 .from('clientes')
                 .insert([{
@@ -2612,32 +3560,43 @@ async function addUnpaidClient(event) {
                 .select('id')
                 .single();
             
-            if (clienteError) throw clienteError;
-            clienteId = novoCliente.id;
+            if (clienteError) {
+                console.error('❌ Erro ao criar cliente:', clienteError);
+                throw clienteError;
+            }
+            clienteId = parseInt(novoCliente.id);
+            console.log('✅ Novo cliente criado, ID:', clienteId);
         }
         
         // Buscar o serviço para obter o ID
+        console.log('🔍 Buscando serviço:', servico);
         const { data: servicoData, error: servicoError } = await supabaseClient
             .from('servicos')
             .select('id')
             .eq('nome', servico)
             .single();
         
-        if (servicoError) throw servicoError;
+        if (servicoError) {
+            console.error('❌ Erro ao buscar serviço:', servicoError);
+            throw servicoError;
+        }
+        console.log('✅ Serviço encontrado, ID:', servicoData.id);
         
         // Criar agendamento concluído
         const dataHorario = new Date(`${dataServico}T12:00:00`);
         
         const agendamento = {
-            cliente_id: clienteId,
-            servico_id: servicoData.id,
+            cliente_id: parseInt(clienteId),
+            servico_id: parseInt(servicoData.id),
             data_horario: dataHorario.toISOString(),
             horario_inicio: '12:00',
             horario_fim: '13:00',
-            preco_cobrado: valorDevido,
+            preco_cobrado: parseFloat(valorDevido),
             status: 'concluido',
             observacoes: observacoes || 'Inadimplente adicionado manualmente'
         };
+        
+        console.log('📝 Dados do agendamento:', agendamento);
         
         const { data: agendamentoData, error: agendamentoError } = await supabaseClient
             .from('agendamentos')
@@ -2645,23 +3604,33 @@ async function addUnpaidClient(event) {
             .select()
             .single();
         
-        if (agendamentoError) throw agendamentoError;
+        if (agendamentoError) {
+            console.error('❌ Erro ao criar agendamento:', agendamentoError);
+            throw agendamentoError;
+        }
+        console.log('✅ Agendamento criado, ID:', agendamentoData.id);
         
         // Adicionar na tabela de inadimplentes
         const inadimplente = {
-            agendamento_id: agendamentoData.id,
-            cliente_id: clienteId,
+            agendamento_id: parseInt(agendamentoData.id),
+            cliente_id: parseInt(clienteId),
             telefone: telefoneNormalizado,
-            valor_devido: valorDevido,
+            valor_devido: parseFloat(valorDevido),
             data_vencimento: dataServico,
             observacoes_cobranca: observacoes || null
         };
+        
+        console.log('📝 Dados do inadimplente:', inadimplente);
         
         const { error: inadimplenteError } = await supabaseClient
             .from('inadimplentes')
             .insert([inadimplente]);
         
-        if (inadimplenteError) throw inadimplenteError;
+        if (inadimplenteError) {
+            console.error('❌ Erro ao criar inadimplente:', inadimplenteError);
+            throw inadimplenteError;
+        }
+        console.log('✅ Inadimplente criado com sucesso!');
         
         showNotification('Cliente inadimplente adicionado com sucesso!', 'success');
         closeAddUnpaidModal();
@@ -3059,6 +4028,255 @@ function contactClientDirect(phone, name) {
     window.open(whatsappUrl, '_blank');
 }
 
+// ==================== MODAL RÁPIDO DE CLIENTE ====================
+
+let currentQuickClientContext = null; // 'add', 'edit', 'unpaid'
+
+// Função para abrir modal rápido de cliente
+function openQuickClientModal(context) {
+    currentQuickClientContext = context;
+    const modal = document.getElementById('quickClientModal');
+    modal.style.display = 'block';
+    
+    // Limpar formulário
+    document.getElementById('quickClientForm').reset();
+    
+    // Focar no campo nome
+    setTimeout(() => {
+        document.getElementById('quickClientNome').focus();
+    }, 100);
+}
+
+// Função para fechar modal rápido de cliente
+function closeQuickClientModal() {
+    const modal = document.getElementById('quickClientModal');
+    modal.style.display = 'none';
+    currentQuickClientContext = null;
+    
+    // Limpar formulário
+    document.getElementById('quickClientForm').reset();
+}
+
+// Função para adicionar cliente rápido
+async function addQuickClient(event) {
+    event.preventDefault();
+    
+    const nome = document.getElementById('quickClientNome').value.trim();
+    const telefone = document.getElementById('quickClientTelefone').value.trim();
+    const email = document.getElementById('quickClientEmail').value.trim();
+    
+    // Validações
+    if (!nome || !telefone) {
+        showNotification('Nome e telefone são obrigatórios.', 'warning');
+        return;
+    }
+    
+    if (!supabaseClient) {
+        showNotification('Funcionalidade disponível apenas com Supabase configurado', 'warning');
+        return;
+    }
+    
+    try {
+        showLoading();
+        
+        const telefoneNormalizado = normalizePhone(telefone);
+        
+        // Verificar se já existe cliente com este telefone
+        const { data: existingClient } = await supabaseClient
+            .from('clientes')
+            .select('*')
+            .eq('telefone', telefoneNormalizado)
+            .single();
+        
+        if (existingClient) {
+            // Cliente já existe, usar o existente
+            fillClientFields(existingClient);
+            showNotification('Cliente já cadastrado! Dados preenchidos automaticamente.', 'info');
+        } else {
+            // Criar novo cliente
+            const clienteData = {
+                nome: nome,
+                telefone: telefoneNormalizado,
+                email: email || null,
+                status_cliente: 'ativo'
+            };
+            
+            const { data: newClient, error } = await supabaseClient
+                .from('clientes')
+                .insert([clienteData])
+                .select()
+                .single();
+            
+            if (error) throw error;
+            
+            // Preencher campos com o novo cliente
+            fillClientFields(newClient);
+            showNotification('Cliente cadastrado e selecionado com sucesso!', 'success');
+            
+            // Atualizar lista de clientes em memória
+            if (allClients) {
+                allClients.push(newClient);
+            }
+        }
+        
+        closeQuickClientModal();
+        
+    } catch (error) {
+        console.error('Erro ao processar cliente:', error);
+        showNotification('Erro ao processar cliente: ' + error.message, 'error');
+    } finally {
+        hideLoading();
+    }
+}
+
+// Função para preencher campos do cliente baseado no contexto
+function fillClientFields(client) {
+    let nomeField, telefoneField;
+    
+    switch (currentQuickClientContext) {
+        case 'add':
+            nomeField = document.getElementById('addNome');
+            telefoneField = document.getElementById('addTelefone');
+            break;
+        case 'edit':
+            nomeField = document.getElementById('editNome');
+            telefoneField = document.getElementById('editTelefone');
+            // Definir cliente selecionado para o autocomplete
+            selectedClientId = client.id;
+            break;
+        case 'unpaid':
+            nomeField = document.getElementById('addUnpaidNome');
+            telefoneField = document.getElementById('addUnpaidTelefone');
+            break;
+    }
+    
+    if (nomeField && telefoneField) {
+        nomeField.value = client.nome;
+        telefoneField.value = client.telefone;
+    }
+}
+
+// ==================== AUTOCOMPLETE MELHORADO ====================
+
+// Função para configurar autocomplete em todos os campos de cliente
+function setupAllClientAutocomplete() {
+    setupClientAutocompleteForField('addNome', 'addTelefone', 'addClientSuggestions');
+    setupClientAutocompleteForField('editNome', 'editTelefone', 'clientSuggestions');
+    setupClientAutocompleteForField('addUnpaidNome', 'addUnpaidTelefone', 'addUnpaidClientSuggestions');
+}
+
+// Função genérica para configurar autocomplete
+function setupClientAutocompleteForField(inputId, phoneId, suggestionsId) {
+    const clientInput = document.getElementById(inputId);
+    const phoneInput = document.getElementById(phoneId);
+    const suggestionsContainer = document.getElementById(suggestionsId);
+    
+    if (!clientInput || !suggestionsContainer) return;
+    
+    let selectedIndex = -1;
+    let currentSelectedClientId = null;
+    
+    clientInput.addEventListener('input', function() {
+        const query = this.value.trim().toLowerCase();
+        currentSelectedClientId = null;
+        
+        if (query.length < 2) {
+            suggestionsContainer.style.display = 'none';
+            return;
+        }
+        
+        const filteredClients = allClients.filter(client => 
+            client.nome.toLowerCase().includes(query) ||
+            client.telefone.includes(query)
+        );
+        
+        if (filteredClients.length === 0) {
+            suggestionsContainer.style.display = 'none';
+            return;
+        }
+        
+        suggestionsContainer.innerHTML = '';
+        filteredClients.forEach((client, index) => {
+            const suggestion = document.createElement('div');
+            suggestion.className = 'client-suggestion';
+            suggestion.innerHTML = `
+                <div class="client-suggestion-name">${client.nome}</div>
+                <div class="client-suggestion-phone">${client.telefone}</div>
+            `;
+            
+            suggestion.addEventListener('click', () => {
+                selectClientForField(client, inputId, phoneId, suggestionsId);
+            });
+            
+            suggestionsContainer.appendChild(suggestion);
+        });
+        
+        suggestionsContainer.style.display = 'block';
+        selectedIndex = -1;
+    });
+    
+    // Navegação com teclado
+    clientInput.addEventListener('keydown', function(e) {
+        const suggestions = suggestionsContainer.querySelectorAll('.client-suggestion');
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, suggestions.length - 1);
+            updateSelectedSuggestion(suggestions);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateSelectedSuggestion(suggestions);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (selectedIndex >= 0 && suggestions[selectedIndex]) {
+                const clientName = suggestions[selectedIndex].querySelector('.client-suggestion-name').textContent;
+                const clientPhone = suggestions[selectedIndex].querySelector('.client-suggestion-phone').textContent;
+                const client = allClients.find(c => c.nome === clientName && c.telefone === clientPhone);
+                if (client) {
+                    selectClientForField(client, inputId, phoneId, suggestionsId);
+                }
+            }
+        } else if (e.key === 'Escape') {
+            suggestionsContainer.style.display = 'none';
+            selectedIndex = -1;
+        }
+    });
+    
+    // Fechar sugestões ao clicar fora
+    document.addEventListener('click', function(e) {
+        if (!clientInput.contains(e.target) && !suggestionsContainer.contains(e.target)) {
+            suggestionsContainer.style.display = 'none';
+            selectedIndex = -1;
+        }
+    });
+    
+    function updateSelectedSuggestion(suggestions) {
+        suggestions.forEach((suggestion, index) => {
+            suggestion.classList.toggle('selected', index === selectedIndex);
+        });
+    }
+}
+
+// Função para selecionar cliente em um campo específico
+function selectClientForField(client, inputId, phoneId, suggestionsId) {
+    const clientInput = document.getElementById(inputId);
+    const phoneInput = document.getElementById(phoneId);
+    const suggestionsContainer = document.getElementById(suggestionsId);
+    
+    clientInput.value = client.nome;
+    if (phoneInput) {
+        phoneInput.value = client.telefone;
+    }
+    
+    suggestionsContainer.style.display = 'none';
+    
+    // Definir cliente selecionado para contextos específicos
+    if (inputId === 'editNome') {
+        selectedClientId = client.id;
+    }
+}
+
 // Tornar funções disponíveis globalmente
 window.loadUnpaidClients = loadUnpaidClients;
 window.markAsPaid = markAsPaid;
@@ -3078,3 +4296,131 @@ window.closeEditClientModal = closeEditClientModal;
 window.updateClient = updateClient;
 window.deleteClient = deleteClient;
 window.contactClientDirect = contactClientDirect;
+
+// Funções do modal rápido
+window.openQuickClientModal = openQuickClientModal;
+window.closeQuickClientModal = closeQuickClientModal;
+window.addQuickClient = addQuickClient;
+
+// ==================== MODAL DE BUSCA DE CLIENTES ====================
+
+let currentClientSearchContext = null; // 'add', 'edit', 'unpaid'
+
+// Função para abrir modal de busca de clientes
+function openClientSearchModal(context) {
+    currentClientSearchContext = context;
+    const modal = document.getElementById('clientSearchModal');
+    modal.style.display = 'block';
+    
+    // Limpar busca
+    document.getElementById('clientSearchInput').value = '';
+    document.getElementById('clientSearchResults').innerHTML = '<div class="search-loading">Digite pelo menos 2 caracteres para buscar...</div>';
+    
+    // Focar no campo de busca
+    setTimeout(() => {
+        document.getElementById('clientSearchInput').focus();
+    }, 100);
+}
+
+// Função para fechar modal de busca de clientes
+function closeClientSearchModal() {
+    const modal = document.getElementById('clientSearchModal');
+    modal.style.display = 'none';
+    currentClientSearchContext = null;
+    
+    // Limpar busca
+    document.getElementById('clientSearchInput').value = '';
+    document.getElementById('clientSearchResults').innerHTML = '<div class="search-loading">Digite pelo menos 2 caracteres para buscar...</div>';
+}
+
+// Função para buscar clientes existentes
+async function searchExistingClients() {
+    const searchInput = document.getElementById('clientSearchInput');
+    const resultsContainer = document.getElementById('clientSearchResults');
+    const query = searchInput.value.trim().toLowerCase();
+    
+    if (query.length < 2) {
+        resultsContainer.innerHTML = '<div class="search-loading">Digite pelo menos 2 caracteres para buscar...</div>';
+        return;
+    }
+    
+    if (!supabaseClient) {
+        resultsContainer.innerHTML = '<div class="search-loading">Funcionalidade disponível apenas com Supabase configurado</div>';
+        return;
+    }
+    
+    try {
+        resultsContainer.innerHTML = '<div class="search-loading">Buscando clientes...</div>';
+        
+        // Buscar clientes que correspondem ao termo
+        const { data: clients, error } = await supabaseClient
+            .from('clientes')
+            .select('*')
+            .or(`nome.ilike.%${query}%,telefone.ilike.%${query}%`)
+            .order('nome');
+        
+        if (error) throw error;
+        
+        if (!clients || clients.length === 0) {
+            resultsContainer.innerHTML = '<div class="search-loading">Nenhum cliente encontrado</div>';
+            return;
+        }
+        
+        // Exibir resultados
+        resultsContainer.innerHTML = '';
+        clients.forEach(client => {
+            const clientItem = document.createElement('div');
+            clientItem.className = 'client-result-item';
+            clientItem.innerHTML = `
+                <div class="client-result-name">${client.nome}</div>
+                <div class="client-result-phone">${client.telefone}</div>
+                ${client.email ? `<div class="client-result-email">${client.email}</div>` : ''}
+            `;
+            
+            clientItem.addEventListener('click', () => {
+                selectClientFromSearch(client);
+            });
+            
+            resultsContainer.appendChild(clientItem);
+        });
+        
+    } catch (error) {
+        console.error('Erro ao buscar clientes:', error);
+        resultsContainer.innerHTML = '<div class="search-loading">Erro ao buscar clientes</div>';
+    }
+}
+
+// Função para selecionar cliente da busca
+function selectClientFromSearch(client) {
+    let nomeField, telefoneField;
+    
+    switch (currentClientSearchContext) {
+        case 'add':
+            nomeField = document.getElementById('addNome');
+            telefoneField = document.getElementById('addTelefone');
+            break;
+        case 'edit':
+            nomeField = document.getElementById('editNome');
+            telefoneField = document.getElementById('editTelefone');
+            // Definir cliente selecionado para o autocomplete
+            selectedClientId = client.id;
+            break;
+        case 'unpaid':
+            nomeField = document.getElementById('addUnpaidNome');
+            telefoneField = document.getElementById('addUnpaidTelefone');
+            break;
+    }
+    
+    if (nomeField && telefoneField) {
+        nomeField.value = client.nome;
+        telefoneField.value = client.telefone;
+    }
+    
+    closeClientSearchModal();
+    showNotification(`Cliente ${client.nome} selecionado!`, 'success');
+}
+
+// Funções do modal de busca
+window.openClientSearchModal = openClientSearchModal;
+window.closeClientSearchModal = closeClientSearchModal;
+window.searchExistingClients = searchExistingClients;

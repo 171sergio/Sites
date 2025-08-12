@@ -379,6 +379,12 @@
                         <label>Cliente:</label>
                         <div class="client-search-container">
                             <input type="text" id="addNome" placeholder="Digite o nome do cliente..." required autocomplete="off">
+                            <button type="button" class="btn-new-client" onclick="openQuickClientModal('add')" title="Cadastrar novo cliente">
+                                <i class="fas fa-user-plus"></i>
+                            </button>
+                            <button type="button" class="btn-search-client" onclick="openClientSearchModal('add')" title="Buscar Cliente">
+                                <i class="fas fa-search"></i>
+                            </button>
                             <div id="addClientSuggestions" class="client-suggestions" style="display: none;"></div>
                         </div>
                     </div>
@@ -389,18 +395,18 @@
                     </div>
                     
                     <div class="form-group">
-                        <label for="addServico">Serviço:</label>
-                        <select id="addServico" required onchange="updateServicePrice()">
+                        <label>Serviço:</label>
+                        <select id="addServico" required onchange="updateAddServicePrice()">
                             <option value="">Selecione um serviço</option>
-                            <option value="Corte" data-price="30.00">Corte - R$ 30,00</option>
-                            <option value="Corte Máquina" data-price="25.00">Corte Máquina - R$ 25,00</option>
-                            <option value="Barba" data-price="20.00">Barba - R$ 20,00</option>
-                            <option value="Pezinho" data-price="15.00">Pezinho - R$ 15,00</option>
-                            <option value="Sobrancelha" data-price="20.00">Sobrancelha - R$ 20,00</option>
-                            <option value="Relaxamento" data-price="20.00">Relaxamento - R$ 20,00</option>
-                            <option value="Tintura" data-price="20.00">Tintura - R$ 20,00</option>
-                            <option value="Luzes" data-price="50.00">Luzes - R$ 50,00</option>
-                            <option value="Platinado" data-price="90.00">Platinado - R$ 90,00</option>
+                            <option value="Corte">Corte</option>
+                            <option value="Corte Máquina">Corte Máquina</option>
+                            <option value="Barba">Barba</option>
+                            <option value="Pezinho">Pezinho</option>
+                            <option value="Sobrancelha">Sobrancelha</option>
+                            <option value="Relaxamento">Relaxamento</option>
+                            <option value="Tintura">Tintura</option>
+                            <option value="Luzes">Luzes</option>
+                            <option value="Platinado">Platinado</option>
                         </select>
                     </div>
                     
@@ -451,7 +457,6 @@
                             <select id="addPagamento">
                                 <option value="">Não informado</option>
                                 <option value="pago">Pago</option>
-                                <option value="pendente">Pendente</option>
                             </select>
                         </div>
                     </div>
@@ -484,6 +489,12 @@
                         <label>Cliente:</label>
                         <div class="client-search-container">
                             <input type="text" id="editNome" placeholder="Digite o nome do cliente..." required autocomplete="off">
+                            <button type="button" class="btn-new-client" onclick="openQuickClientModal('edit')" title="Cadastrar novo cliente">
+                                <i class="fas fa-user-plus"></i>
+                            </button>
+                            <button type="button" class="btn-search-client" onclick="openClientSearchModal('edit')" title="Buscar Cliente">
+                                <i class="fas fa-search"></i>
+                            </button>
                             <div id="clientSuggestions" class="client-suggestions" style="display: none;"></div>
                         </div>
                     </div>
@@ -497,15 +508,15 @@
                         <label>Serviço:</label>
                         <select id="editServico" required onchange="updateEditServicePrice()">
                             <option value="">Selecione um serviço</option>
-                            <option value="Corte" data-price="30.00">Corte - R$ 30,00</option>
-                            <option value="Corte Máquina" data-price="25.00">Corte Máquina - R$ 25,00</option>
-                            <option value="Barba" data-price="20.00">Barba - R$ 20,00</option>
-                            <option value="Pezinho" data-price="15.00">Pezinho - R$ 15,00</option>
-                            <option value="Sobrancelha" data-price="20.00">Sobrancelha - R$ 20,00</option>
-                            <option value="Relaxamento" data-price="20.00">Relaxamento - R$ 20,00</option>
-                            <option value="Tintura" data-price="20.00">Tintura - R$ 20,00</option>
-                            <option value="Luzes" data-price="50.00">Luzes - R$ 50,00</option>
-                            <option value="Platinado" data-price="90.00">Platinado - R$ 90,00</option>
+                            <option value="Corte">Corte</option>
+                            <option value="Corte Máquina">Corte Máquina</option>
+                            <option value="Barba">Barba</option>
+                            <option value="Pezinho">Pezinho</option>
+                            <option value="Sobrancelha">Sobrancelha</option>
+                            <option value="Relaxamento">Relaxamento</option>
+                            <option value="Tintura">Tintura</option>
+                            <option value="Luzes">Luzes</option>
+                            <option value="Platinado">Platinado</option>
                         </select>
                     </div>
                     
@@ -556,7 +567,6 @@
                             <select id="editPagamento">
                                 <option value="">Não informado</option>
                                 <option value="pago">Pago</option>
-                                <option value="pendente">Pendente</option>
                             </select>
                         </div>
                     </div>
@@ -587,6 +597,12 @@
                         <label>Cliente:</label>
                         <div class="client-search-container">
                             <input type="text" id="addUnpaidNome" placeholder="Digite o nome do cliente..." required autocomplete="off">
+                            <button type="button" class="btn-new-client" onclick="openQuickClientModal('unpaid')" title="Cadastrar novo cliente">
+                                <i class="fas fa-user-plus"></i>
+                            </button>
+                            <button type="button" class="btn-search-client" onclick="openClientSearchModal('unpaid')" title="Buscar Cliente">
+                                <i class="fas fa-search"></i>
+                            </button>
                             <div id="addUnpaidClientSuggestions" class="client-suggestions" style="display: none;"></div>
                         </div>
                     </div>
@@ -600,15 +616,15 @@
                         <label for="addUnpaidServico">Serviço:</label>
                         <select id="addUnpaidServico" required onchange="updateUnpaidServicePrice()">
                             <option value="">Selecione um serviço</option>
-                            <option value="Corte" data-price="30.00">Corte - R$ 30,00</option>
-                            <option value="Corte Máquina" data-price="25.00">Corte Máquina - R$ 25,00</option>
-                            <option value="Barba" data-price="20.00">Barba - R$ 20,00</option>
-                            <option value="Pezinho" data-price="15.00">Pezinho - R$ 15,00</option>
-                            <option value="Sobrancelha" data-price="20.00">Sobrancelha - R$ 20,00</option>
-                            <option value="Relaxamento" data-price="20.00">Relaxamento - R$ 20,00</option>
-                            <option value="Tintura" data-price="20.00">Tintura - R$ 20,00</option>
-                            <option value="Luzes" data-price="50.00">Luzes - R$ 50,00</option>
-                            <option value="Platinado" data-price="90.00">Platinado - R$ 90,00</option>
+                            <option value="Corte">Corte</option>
+                            <option value="Corte Máquina">Corte Máquina</option>
+                            <option value="Barba">Barba</option>
+                            <option value="Pezinho">Pezinho</option>
+                            <option value="Sobrancelha">Sobrancelha</option>
+                            <option value="Relaxamento">Relaxamento</option>
+                            <option value="Tintura">Tintura</option>
+                            <option value="Luzes">Luzes</option>
+                            <option value="Platinado">Platinado</option>
                         </select>
                     </div>
                     
@@ -744,6 +760,60 @@
         <div class="loading-spinner">
             <i class="fas fa-spinner fa-spin"></i>
             <p>Carregando...</p>
+        </div>
+    </div>
+
+    <!-- Modal Rápido para Cadastrar Cliente -->
+    <div id="quickClientModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4>Cadastro Rápido de Cliente</h4>
+                <span class="close" onclick="closeQuickClientModal()">&times;</span>
+            </div>
+            <div class="modal-body">
+                <form id="quickClientForm" onsubmit="addQuickClient(event)">
+                    <div class="form-group">
+                        <label>Nome Completo:</label>
+                        <input type="text" id="quickClientNome" placeholder="Digite o nome completo..." required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Telefone:</label>
+                        <input type="tel" id="quickClientTelefone" placeholder="(11) 99999-9999" required>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Email (opcional):</label>
+                        <input type="email" id="quickClientEmail" placeholder="cliente@email.com">
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-cancel" onclick="closeQuickClientModal()">Cancelar</button>
+                <button type="submit" form="quickClientForm" class="btn-save">Cadastrar e Usar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Busca de Clientes -->
+    <div id="clientSearchModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Buscar Cliente Existente</h3>
+                <span class="close" onclick="closeClientSearchModal()">&times;</span>
+            </div>
+            <div class="search-section">
+                <div class="form-group">
+                    <label for="clientSearchInput">Buscar por nome ou telefone</label>
+                    <input type="text" id="clientSearchInput" placeholder="Digite para buscar..." oninput="searchExistingClients()">
+                </div>
+                <div id="clientSearchResults" class="client-search-results">
+                    <div class="search-loading">Digite pelo menos 2 caracteres para buscar...</div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-cancel" onclick="closeClientSearchModal()">Cancelar</button>
+            </div>
         </div>
     </div>
 

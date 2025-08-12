@@ -355,10 +355,10 @@ SELECT
     a.status,
     a.preco_cobrado,
     a.observacoes,
-    c.nome as cliente_nome,
-    c.telefone as cliente_telefone,
-    s.nome as servico_nome,
-    s.duracao_minutos,
+    COALESCE(c.nome, 'Cliente Removido') as cliente_nome,
+    COALESCE(c.telefone, '') as cliente_telefone,
+    COALESCE(s.nome, 'Serviço Removido') as servico_nome,
+    COALESCE(s.duracao_minutos, 30) as duracao_minutos,
     COALESCE(SUM(p.valor_pago), 0) as valor_pago,
     (a.preco_cobrado - COALESCE(SUM(p.valor_pago), 0)) as valor_pendente,
     CASE 
@@ -367,8 +367,8 @@ SELECT
         ELSE 'pendente'
     END as status_pagamento
 FROM agendamentos a
-JOIN clientes c ON a.cliente_id = c.id
-JOIN servicos s ON a.servico_id = s.id
+LEFT JOIN clientes c ON a.cliente_id = c.id
+LEFT JOIN servicos s ON a.servico_id = s.id
 LEFT JOIN pagamentos p ON a.id = p.agendamento_id AND p.status_pagamento = 'aprovado'
 GROUP BY a.id, c.id, s.id;
 
