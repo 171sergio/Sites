@@ -836,6 +836,11 @@ function initializeApp() {
         setDefaultDates();
         
         loadDashboardData();
+        
+        // Inicializar sistema de verificação automática de agendamentos
+        if (isSupabaseConfigured) {
+            initializeAppointmentStatusChecker();
+        }
     } else {
         showLogin();
     }
@@ -3269,15 +3274,28 @@ async function updateUnpaidList() {
     if (!supabaseClient) return;
     
     try {
-        // Atualizar dias de atraso para todos os inadimplentes
-        const { error } = await supabaseClient
+        // Buscar inadimplentes e calcular dias de atraso no frontend
+        const { data: inadimplentes, error } = await supabaseClient
             .from('inadimplentes')
-            .update({ 
-                dias_atraso: supabaseClient.raw('GREATEST(0, DATE_PART(\'day\', CURRENT_DATE - data_vencimento))')
-            })
+            .select('*')
             .neq('status_cobranca', 'quitado');
         
         if (error) throw error;
+        
+        // Atualizar dias de atraso para cada inadimplente
+        for (const inadimplente of inadimplentes || []) {
+            const dataVencimento = new Date(inadimplente.data_vencimento);
+            const hoje = new Date();
+            const diasAtraso = Math.max(0, Math.floor((hoje - dataVencimento) / (1000 * 60 * 60 * 24)));
+            
+            if (diasAtraso !== inadimplente.dias_atraso) {
+                await supabaseClient
+                    .from('inadimplentes')
+                    .update({ dias_atraso: diasAtraso })
+                    .eq('id', inadimplente.id);
+            }
+        }
+        
         // Lista atualizada com sucesso
     } catch (error) {
         console.error('Erro ao atualizar lista de inadimplentes:', error);
@@ -3368,12 +3386,19 @@ async function markAsPaid(appointmentId) {
     }
     
     try {
+        // Buscar o valor devido antes de atualizar
+        const { data: inadimplente } = await supabaseClient
+            .from('inadimplentes')
+            .select('valor_devido')
+            .eq('agendamento_id', appointmentId)
+            .single();
+        
         // Atualizar status do inadimplente para quitado
         const { error: inadimplenteError } = await supabaseClient
             .from('inadimplentes')
             .update({ 
                 status_cobranca: 'quitado',
-                valor_pago: supabaseClient.raw('valor_devido')
+                valor_pago: inadimplente?.valor_devido || 0
             })
             .eq('agendamento_id', appointmentId);
         
@@ -3416,10 +3441,17 @@ async function contactClient(phone, name, appointmentId) {
     // Registrar o contato no banco se estiver usando Supabase
     if (supabaseClient && appointmentId) {
         try {
+            // Buscar tentativas atuais antes de incrementar
+            const { data: inadimplente } = await supabaseClient
+                .from('inadimplentes')
+                .select('tentativas_contato')
+                .eq('agendamento_id', appointmentId)
+                .single();
+            
             await supabaseClient
                 .from('inadimplentes')
                 .update({ 
-                    tentativas_contato: supabaseClient.raw('tentativas_contato + 1'),
+                    tentativas_contato: (inadimplente?.tentativas_contato || 0) + 1,
                     ultimo_contato: new Date().toISOString()
                 })
                 .eq('agendamento_id', appointmentId);
@@ -3494,17 +3526,219 @@ function updateUnpaidServicePrice() {
     }
 }
 
+// Função para alternar tipo de inadimplência
+function toggleUnpaidType() {
+    const appointmentRadio = document.querySelector('input[name="unpaidType"][value="appointment"]');
+    const appointmentSelection = document.getElementById('appointmentSelection');
+    const clientFields = document.querySelectorAll('#addUnpaidNome, #addUnpaidTelefone, #addUnpaidServico, #addUnpaidData, #addUnpaidValor');
+    
+    if (appointmentRadio.checked) {
+        appointmentSelection.style.display = 'block';
+        loadPendingAppointments();
+        // Desabilitar campos que serão preenchidos automaticamente
+        clientFields.forEach(field => field.disabled = true);
+    } else {
+        appointmentSelection.style.display = 'none';
+        // Habilitar campos para preenchimento manual
+        clientFields.forEach(field => field.disabled = false);
+        clearUnpaidForm();
+    }
+}
+
+// Função para carregar agendamentos para correlacionar com inadimplentes
+async function loadPendingAppointments() {
+    if (!isSupabaseConfigured) {
+        console.warn('⚠️ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        const { data: appointments, error } = await supabaseClient
+            .from('agendamentos')
+            .select(`
+                id,
+                data_horario,
+                horario_inicio,
+                horario_fim,
+                preco_cobrado,
+                status,
+                clientes!inner(nome, telefone),
+                servicos!inner(nome, preco_base)
+            `)
+            .order('data_horario', { ascending: false })
+            .order('horario_inicio', { ascending: true });
+            
+        if (error) throw error;
+        
+        const select = document.getElementById('addUnpaidAppointment');
+        select.innerHTML = '<option value="">Selecione um agendamento</option>';
+        
+        appointments.forEach(appointment => {
+            const option = document.createElement('option');
+            option.value = appointment.id;
+            const dataFormatada = formatDate(appointment.data_horario.split('T')[0]);
+            const statusText = appointment.status ? ` (${appointment.status})` : '';
+            option.textContent = `${appointment.clientes.nome} - ${appointment.servicos.nome} - ${dataFormatada} ${appointment.horario_inicio}-${appointment.horario_fim}${statusText}`;
+            option.dataset.appointment = JSON.stringify(appointment);
+            select.appendChild(option);
+        });
+        
+    } catch (error) {
+        console.error('❌ Erro ao carregar agendamentos:', error);
+        showNotification('Erro ao carregar agendamentos', 'error');
+    }
+}
+
+// Função para verificar e atualizar status de agendamentos vencidos
+async function checkAndUpdateExpiredAppointments() {
+    if (!isSupabaseConfigured) {
+        console.warn('⚠️ Supabase não configurado');
+        return;
+    }
+    
+    try {
+        const now = new Date();
+        const today = now.toISOString().split('T')[0];
+        const currentTime = now.toTimeString().slice(0, 5); // HH:MM
+
+        console.log('🕐 Verificando agendamentos que passaram do horário...', { today, currentTime });
+
+        // Buscar agendamentos que já passaram do horário
+        const { data: expiredAppointments, error } = await supabaseClient
+            .from('agendamentos')
+            .select('id, data_horario, horario_inicio, horario_fim')
+            .in('status', ['agendado', 'confirmado'])
+            .lt('data_horario', now.toISOString());
+
+        if (error) {
+            console.error('❌ Erro ao buscar agendamentos:', error);
+            return;
+        }
+
+        if (!expiredAppointments || expiredAppointments.length === 0) {
+            console.log('✅ Nenhum agendamento vencido encontrado');
+            return;
+        }
+
+        const appointmentsToUpdate = [];
+
+        expiredAppointments.forEach(appointment => {
+            const appointmentDateTime = new Date(appointment.data_horario);
+            const appointmentEndTime = appointment.horario_fim;
+            
+            // Criar data/hora de fim do agendamento
+            const [hours, minutes] = appointmentEndTime.split(':');
+            const appointmentEndDateTime = new Date(appointmentDateTime);
+            appointmentEndDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+
+            // Se já passou do horário de fim, marcar para atualização
+            if (now > appointmentEndDateTime) {
+                appointmentsToUpdate.push(appointment.id);
+            }
+        });
+
+        if (appointmentsToUpdate.length > 0) {
+            console.log(`📅 Atualizando ${appointmentsToUpdate.length} agendamentos para 'não compareceu':`, appointmentsToUpdate);
+
+            const { error: updateError } = await supabaseClient
+                .from('agendamentos')
+                .update({ status: 'nao_compareceu' })
+                .in('id', appointmentsToUpdate);
+
+            if (updateError) {
+                console.error('❌ Erro ao atualizar status dos agendamentos:', updateError);
+            } else {
+                console.log('✅ Status dos agendamentos atualizado com sucesso!');
+                // Recarregar a lista de agendamentos se estiver na página relevante
+                if (typeof loadAppointments === 'function') {
+                    loadAppointments();
+                }
+                if (typeof loadTodayAppointments === 'function') {
+                    loadTodayAppointments();
+                }
+            }
+        }
+    } catch (error) {
+        console.error('❌ Erro na verificação automática de agendamentos:', error);
+    }
+}
+
+// Inicializar verificação automática de agendamentos vencidos
+function initializeAppointmentStatusChecker() {
+    // Verificar imediatamente
+    checkAndUpdateExpiredAppointments();
+    
+    // Verificar a cada 5 minutos (300000 ms)
+    setInterval(checkAndUpdateExpiredAppointments, 300000);
+    
+    console.log('🔄 Sistema de verificação automática de agendamentos iniciado');
+}
+
+// Função para preencher formulário com dados do agendamento
+function fillFromAppointment() {
+    const select = document.getElementById('addUnpaidAppointment');
+    const selectedOption = select.options[select.selectedIndex];
+    
+    if (selectedOption.value && selectedOption.dataset.appointment) {
+        const appointment = JSON.parse(selectedOption.dataset.appointment);
+        
+        document.getElementById('addUnpaidNome').value = appointment.clientes.nome;
+        document.getElementById('addUnpaidTelefone').value = appointment.clientes.telefone;
+        document.getElementById('addUnpaidServico').value = appointment.servicos.nome;
+        document.getElementById('addUnpaidData').value = appointment.data_horario.split('T')[0];
+        document.getElementById('addUnpaidValor').value = appointment.preco_cobrado || appointment.servicos.preco_base;
+    }
+}
+
+// Função para limpar formulário de inadimplentes
+function clearUnpaidForm() {
+    document.getElementById('addUnpaidNome').value = '';
+    document.getElementById('addUnpaidTelefone').value = '';
+    document.getElementById('addUnpaidServico').value = '';
+    document.getElementById('addUnpaidData').value = '';
+    document.getElementById('addUnpaidValor').value = '';
+    document.getElementById('addUnpaidObservacoes').value = '';
+}
+
 // Função para adicionar cliente inadimplente
 async function addUnpaidClient(event) {
     console.log('🔄 Iniciando addUnpaidClient...');
     event.preventDefault();
     
-    const clienteNome = document.getElementById('addUnpaidNome').value.trim();
-    const clienteTelefone = document.getElementById('addUnpaidTelefone').value.trim();
-    const servico = document.getElementById('addUnpaidServico').value;
-    const dataServico = document.getElementById('addUnpaidData').value;
-    const valorDevido = parseFloat(document.getElementById('addUnpaidValor').value) || 0;
+    // Verificar tipo de inadimplência
+    const unpaidType = document.querySelector('input[name="unpaidType"]:checked').value;
+    const isAppointmentBased = unpaidType === 'appointment';
+    
+    let appointmentId = null;
+    let clienteNome, clienteTelefone, servico, dataServico, valorDevido;
     const observacoes = document.getElementById('addUnpaidObservacoes').value.trim();
+    
+    if (isAppointmentBased) {
+        // Inadimplência baseada em agendamento
+        appointmentId = document.getElementById('addUnpaidAppointment').value;
+        if (!appointmentId) {
+            showNotification('Por favor, selecione um agendamento.', 'warning');
+            return;
+        }
+        
+        // Obter dados do agendamento selecionado
+        const select = document.getElementById('addUnpaidAppointment');
+        const selectedOption = select.options[select.selectedIndex];
+        const appointment = JSON.parse(selectedOption.dataset.appointment);
+        
+        clienteNome = appointment.clientes.nome;
+        clienteTelefone = appointment.clientes.telefone;
+        servico = appointment.servicos.nome;
+        dataServico = appointment.data_horario.split('T')[0];
+        valorDevido = parseFloat(appointment.preco_cobrado || appointment.servicos.preco_base) || 0;
+    } else {
+        // Inadimplência independente
+        clienteNome = document.getElementById('addUnpaidNome').value.trim();
+        clienteTelefone = document.getElementById('addUnpaidTelefone').value.trim();
+        servico = document.getElementById('addUnpaidServico').value;
+        dataServico = document.getElementById('addUnpaidData').value;
+        valorDevido = parseFloat(document.getElementById('addUnpaidValor').value) || 0;
+    }
     
     console.log('📝 Dados coletados:', {
         clienteNome,
@@ -3568,51 +3802,74 @@ async function addUnpaidClient(event) {
             console.log('✅ Novo cliente criado, ID:', clienteId);
         }
         
-        // Buscar o serviço para obter o ID
-        console.log('🔍 Buscando serviço:', servico);
-        const { data: servicoData, error: servicoError } = await supabaseClient
-            .from('servicos')
-            .select('id')
-            .eq('nome', servico)
-            .single();
+        let agendamentoId;
         
-        if (servicoError) {
-            console.error('❌ Erro ao buscar serviço:', servicoError);
-            throw servicoError;
+        if (isAppointmentBased) {
+            // Inadimplência baseada em agendamento existente
+            agendamentoId = parseInt(appointmentId);
+            
+            // Atualizar status do agendamento para 'concluido' (serviço realizado mas não pago)
+            const { error: updateError } = await supabaseClient
+                .from('agendamentos')
+                .update({ status: 'concluido' })
+                .eq('id', agendamentoId);
+                
+            if (updateError) {
+                console.error('❌ Erro ao atualizar agendamento:', updateError);
+                throw updateError;
+            }
+            console.log('✅ Status do agendamento atualizado para concluído');
+            
+        } else {
+            // Inadimplência independente - criar novo agendamento
+            
+            // Buscar o serviço para obter o ID
+            console.log('🔍 Buscando serviço:', servico);
+            const { data: servicoData, error: servicoError } = await supabaseClient
+                .from('servicos')
+                .select('id')
+                .eq('nome', servico)
+                .single();
+            
+            if (servicoError) {
+                console.error('❌ Erro ao buscar serviço:', servicoError);
+                throw servicoError;
+            }
+            console.log('✅ Serviço encontrado, ID:', servicoData.id);
+            
+            // Criar agendamento concluído
+            const dataHorario = new Date(`${dataServico}T12:00:00`);
+            
+            const agendamento = {
+                cliente_id: parseInt(clienteId),
+                servico_id: parseInt(servicoData.id),
+                data_horario: dataHorario.toISOString(),
+                horario_inicio: '12:00',
+                horario_fim: '13:00',
+                preco_cobrado: parseFloat(valorDevido),
+                status: 'concluido',
+                observacoes: observacoes || 'Inadimplente adicionado manualmente'
+            };
+            
+            console.log('📝 Dados do agendamento:', agendamento);
+            
+            const { data: agendamentoData, error: agendamentoError } = await supabaseClient
+                .from('agendamentos')
+                .insert([agendamento])
+                .select()
+                .single();
+            
+            if (agendamentoError) {
+                console.error('❌ Erro ao criar agendamento:', agendamentoError);
+                throw agendamentoError;
+            }
+            console.log('✅ Agendamento criado, ID:', agendamentoData.id);
+            agendamentoId = agendamentoData.id;
         }
-        console.log('✅ Serviço encontrado, ID:', servicoData.id);
-        
-        // Criar agendamento concluído
-        const dataHorario = new Date(`${dataServico}T12:00:00`);
-        
-        const agendamento = {
-            cliente_id: parseInt(clienteId),
-            servico_id: parseInt(servicoData.id),
-            data_horario: dataHorario.toISOString(),
-            horario_inicio: '12:00',
-            horario_fim: '13:00',
-            preco_cobrado: parseFloat(valorDevido),
-            status: 'concluido',
-            observacoes: observacoes || 'Inadimplente adicionado manualmente'
-        };
-        
-        console.log('📝 Dados do agendamento:', agendamento);
-        
-        const { data: agendamentoData, error: agendamentoError } = await supabaseClient
-            .from('agendamentos')
-            .insert([agendamento])
-            .select()
-            .single();
-        
-        if (agendamentoError) {
-            console.error('❌ Erro ao criar agendamento:', agendamentoError);
-            throw agendamentoError;
-        }
-        console.log('✅ Agendamento criado, ID:', agendamentoData.id);
         
         // Adicionar na tabela de inadimplentes
         const inadimplente = {
-            agendamento_id: parseInt(agendamentoData.id),
+            agendamento_id: parseInt(agendamentoId),
             cliente_id: parseInt(clienteId),
             telefone: telefoneNormalizado,
             valor_devido: parseFloat(valorDevido),

@@ -1219,6 +1219,144 @@ body {
     background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
 }
 
+/* ===== RADIO BUTTONS MODERNOS ===== */
+.radio-group {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.radio-label {
+    position: relative;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 1rem 1.5rem;
+    background: rgba(44, 44, 44, 0.8);
+    border: 2px solid rgba(220, 38, 38, 0.3);
+    border-radius: 12px;
+    transition: all 0.3s ease;
+    min-width: 200px;
+    justify-content: center;
+    font-weight: 500;
+    user-select: none;
+}
+
+.radio-label:hover {
+    background: rgba(220, 38, 38, 0.1);
+    border-color: rgba(220, 38, 38, 0.6);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(220, 38, 38, 0.2);
+}
+
+.radio-label input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.radio-label input[type="radio"]:checked + span {
+    color: #ffffff;
+}
+
+.radio-label input[type="radio"]:checked ~ .radio-label {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    border-color: #dc2626;
+    box-shadow: 0 8px 25px rgba(220, 38, 38, 0.4);
+}
+
+.radio-label input[type="radio"]:checked {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+}
+
+.radio-label:has(input[type="radio"]:checked) {
+    background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+    border-color: #dc2626;
+    box-shadow: 0 8px 25px rgba(220, 38, 38, 0.4);
+    transform: translateY(-2px);
+}
+
+.radio-label span {
+    position: relative;
+    z-index: 1;
+    font-size: 0.95rem;
+    transition: color 0.3s ease;
+    color: #e5e5e5;
+}
+
+.radio-label:has(input[type="radio"]:checked) span {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+/* Efeito de ondulação ao clicar */
+.radio-label::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: width 0.3s ease, height 0.3s ease;
+}
+
+.radio-label:active::before {
+    width: 100%;
+    height: 100%;
+}
+
+/* Ícones para os radio buttons */
+.radio-label span::before {
+    content: '';
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    margin-right: 10px;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    transition: all 0.3s ease;
+    position: relative;
+}
+
+.radio-label:has(input[type="radio"]:checked) span::before {
+    background: #ffffff;
+    border-color: #ffffff;
+}
+
+.radio-label:has(input[type="radio"]:checked) span::after {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    background: #dc2626;
+    border-radius: 50%;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+    .radio-group {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+    
+    .radio-label {
+        min-width: auto;
+        width: 100%;
+        padding: 0.875rem 1.25rem;
+    }
+    
+    .radio-label span {
+        font-size: 0.9rem;
+    }
+}
+
 /* Botão Buscar Cliente */
 .btn-search-client {
     background: #007bff;

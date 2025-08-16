@@ -415,13 +415,16 @@ INSERT INTO config_barbearia (categoria, chave, valor, tipo_valor, descricao) VA
 ('cobranca', 'valor_minimo_cobranca', '10.00', 'numero', 'Valor mínimo para iniciar cobrança'),
 ('notificacoes', 'lembrete_horas_antes', '24', 'numero', 'Horas antes do agendamento para enviar lembrete');
 
--- Serviços básicos
+-- Serviços da barbearia
 INSERT INTO servicos (nome, descricao, preco_base, duracao_minutos, categoria) VALUES
-('Corte Simples', 'Corte de cabelo tradicional', 30.00, 30, 'corte'),
-('Corte + Barba', 'Corte de cabelo + barba completa', 45.00, 45, 'combo'),
-('Barba', 'Apenas barba', 20.00, 20, 'barba'),
-('Corte Degradê', 'Corte degradê moderno', 35.00, 40, 'corte'),
-('Sobrancelha', 'Design de sobrancelha', 15.00, 15, 'extras'),
-('Lavagem', 'Lavagem de cabelo', 10.00, 10, 'extras');
+('Corte', 'Corte de cabelo tradicional', 30.00, 30, 'corte'),
+('Corte Máquina', 'Corte de cabelo com máquina', 25.00, 25, 'corte'),
+('Barba', 'Barba completa', 20.00, 20, 'barba'),
+('Pezinho', 'Acabamento do pezinho', 15.00, 15, 'acabamento'),
+('Sobrancelha', 'Design de sobrancelha', 20.00, 15, 'extras'),
+('Relaxamento', 'Relaxamento capilar', 20.00, 45, 'tratamento'),
+('Tintura', 'Tintura de cabelo', 20.00, 60, 'tratamento'),
+('Luzes', 'Mechas e luzes', 50.00, 90, 'tratamento'),
+('Platinado', 'Cabelo platinado', 90.00, 120, 'tratamento');
 
 COMMIT;

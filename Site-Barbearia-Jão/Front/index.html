@@ -374,7 +374,7 @@
                 <span class="close" onclick="closeAddModal()">&times;</span>
             </div>
             <div class="modal-body">
-                <form id="addForm" onsubmit="addNewAppointment(event)">
+                <form id="addForm">
                     <div class="form-group">
                         <label>Cliente:</label>
                         <div class="client-search-container">
@@ -593,6 +593,27 @@
             </div>
             <div class="modal-body">
                 <form id="addUnpaidForm" onsubmit="addUnpaidClient(event)">
+                    <div class="form-group">
+                        <label>Tipo de Inadimplência:</label>
+                        <div class="radio-group">
+                            <label class="radio-label">
+                                <input type="radio" name="unpaidType" value="independent" checked onchange="toggleUnpaidType()">
+                                <span>Inadimplência Independente</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="unpaidType" value="appointment" onchange="toggleUnpaidType()">
+                                <span>Correlacionar com Agendamento</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div id="appointmentSelection" class="form-group" style="display: none;">
+                        <label>Agendamento:</label>
+                        <select id="addUnpaidAppointment" onchange="fillFromAppointment()">
+                            <option value="">Selecione um agendamento</option>
+                        </select>
+                    </div>
+                    
                     <div class="form-group">
                         <label>Cliente:</label>
                         <div class="client-search-container">
